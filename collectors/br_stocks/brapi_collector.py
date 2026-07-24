@@ -18,6 +18,13 @@ class BrapiCollector:
     `modules`, retorna 401 "Token de autenticação não fornecido" sem
     token) — não funciona mais sem BRAPI_API_TOKEN configurado, ao
     contrário do que se assumia originalmente.
+
+    Pede só a cotação simples (sem `fundamental`/`modules`): os módulos
+    `defaultKeyStatistics`/`financialData` exigem plano pago (confirmado
+    empiricamente: token válido do plano gratuito recebe 403
+    "MODULES_NOT_AVAILABLE" ao pedi-los) e nem são necessários — os campos
+    que `FundamentalistAnalyzer` usa daqui (`priceEarnings`,
+    `regularMarketPrice`, `marketCap`) já vêm na cotação simples.
     """
 
     source_name = "brapi.dev"
@@ -36,11 +43,7 @@ class BrapiCollector:
             )
 
         bare_ticker = asset.ticker.removesuffix(".SA")
-        params = {
-            "fundamental": "true",
-            "modules": "defaultKeyStatistics,financialData",
-            "token": settings.brapi_api_token,
-        }
+        params = {"token": settings.brapi_api_token}
 
         try:
             response = requests.get(
