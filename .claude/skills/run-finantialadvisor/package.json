@@ -1,0 +1,9 @@
+{
+  "name": "run-finantialadvisor-driver",
+  "private": true,
+  "type": "module",
+  "description": "Playwright driver used by .claude/skills/run-finantialadvisor to drive the Streamlit dashboard headlessly.",
+  "dependencies": {
+    "playwright": "1.61.1"
+  }
+}
