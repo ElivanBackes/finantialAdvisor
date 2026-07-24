@@ -1,7 +1,10 @@
 import streamlit as st
 
+from config.logging_setup import configure_logging
 from config.mongo import get_database
 from persistence.schemas.indexes import ensure_indexes
+
+configure_logging()
 
 st.set_page_config(page_title="Financial Advisor", page_icon="💰", layout="wide")
 
@@ -19,6 +22,7 @@ pages = [
         title="Conclusão e Recomendação",
         icon="🧭",
     ),
+    st.Page("dashboard/pages/6_Logs.py", title="Logs", icon="📜"),
 ]
 
 with st.sidebar:

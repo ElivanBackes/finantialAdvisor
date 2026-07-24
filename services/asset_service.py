@@ -78,6 +78,8 @@ class AssetService:
         de serem calculadas e persistidas. O tipo correspondente recebe
         `None` no retorno quando a análise não pôde ser produzida.
         """
+        logger.info("Iniciando coleta e análise para %s", ticker, extra={"ticker": ticker})
+
         asset_id = self.get_or_create_asset(ticker=ticker, asset_type=asset_type, name=name)
         asset_doc = self._asset_repository.get_by_ticker(ticker)
         asset = Asset(ticker=ticker, asset_type=asset_type, name=asset_doc.get("name", ticker))
@@ -89,12 +91,19 @@ class AssetService:
                 raw = collector.fetch(asset)
             except FinancialAdvisorError as exc:
                 logger.warning(
-                    "Collector '%s' falhou para %s: %s", collector.source_name, ticker, exc
+                    "Collector '%s' falhou para %s: %s",
+                    collector.source_name,
+                    ticker,
+                    exc,
+                    extra={"ticker": ticker},
                 )
                 continue
             except Exception:
                 logger.exception(
-                    "Collector '%s' falhou inesperadamente para %s", collector.source_name, ticker
+                    "Collector '%s' falhou inesperadamente para %s",
+                    collector.source_name,
+                    ticker,
+                    extra={"ticker": ticker},
                 )
                 continue
 
@@ -115,7 +124,10 @@ class AssetService:
             relevant = [rd for src, rd in raw_by_source.items() if src in allowed]
             if not relevant:
                 logger.warning(
-                    "Sem RawData para %s (%s) — análise pulada", analysis_type.value, ticker
+                    "Sem RawData para %s (%s) — análise pulada",
+                    analysis_type.value,
+                    ticker,
+                    extra={"ticker": ticker},
                 )
                 results[analysis_type] = None
                 continue
@@ -125,13 +137,20 @@ class AssetService:
                 result = analyzer.analyze(asset, relevant)
             except FinancialAdvisorError as exc:
                 logger.warning(
-                    "Analyzer '%s' falhou para %s: %s", analysis_type.value, ticker, exc
+                    "Analyzer '%s' falhou para %s: %s",
+                    analysis_type.value,
+                    ticker,
+                    exc,
+                    extra={"ticker": ticker},
                 )
                 results[analysis_type] = None
                 continue
             except Exception:
                 logger.exception(
-                    "Analyzer '%s' falhou inesperadamente para %s", analysis_type.value, ticker
+                    "Analyzer '%s' falhou inesperadamente para %s",
+                    analysis_type.value,
+                    ticker,
+                    extra={"ticker": ticker},
                 )
                 results[analysis_type] = None
                 continue
@@ -148,5 +167,19 @@ class AssetService:
                 }
             )
             results[analysis_type] = result
+            logger.info(
+                "Análise '%s' concluída com sucesso para %s",
+                analysis_type.value,
+                ticker,
+                extra={"ticker": ticker},
+            )
 
+        successful = sum(1 for r in results.values() if r is not None)
+        logger.info(
+            "Coleta e análise finalizada para %s: %d/%d análises concluídas",
+            ticker,
+            successful,
+            len(results),
+            extra={"ticker": ticker},
+        )
         return results

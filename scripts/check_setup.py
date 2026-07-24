@@ -8,11 +8,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from config.logging_setup import configure_logging  # noqa: E402
 from config.mongo import get_database  # noqa: E402
 from persistence.schemas.indexes import ensure_indexes  # noqa: E402
 
 
 def main() -> int:
+    configure_logging()
     try:
         db = get_database()
         db.client.admin.command("ping")

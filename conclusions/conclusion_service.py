@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
 
@@ -13,6 +14,8 @@ from core.analyzers.base import AnalysisType
 from core.exceptions import ConclusionError
 from persistence.repositories.conclusion_repository import ConclusionRepository
 from services.asset_service import AssetService
+
+logger = logging.getLogger(__name__)
 
 _SCORERS: dict[AnalysisType, Callable[[dict], tuple[float | None, list[str]]]] = {
     AnalysisType.FUNDAMENTALIST: score_fundamentalist,
@@ -56,6 +59,8 @@ class ConclusionService:
         sub-score utilizável (ex: ticker nunca coletado, ou as 3 análises
         falharam/estão vazias).
         """
+        logger.info("Iniciando build_conclusion para %s", ticker, extra={"ticker": ticker})
+
         latest = self._asset_service.get_latest_analyses(asset_id)
 
         breakdown: dict[str, dict] = {}
@@ -86,6 +91,11 @@ class ConclusionService:
             available_scores.append(sub_score)
 
         if not available_scores:
+            logger.warning(
+                "Não há análises suficientes para gerar conclusão de %s",
+                ticker,
+                extra={"ticker": ticker},
+            )
             raise ConclusionError(
                 f"Não há análises suficientes para gerar uma conclusão de '{ticker}'. "
                 "Rode 'Coletar e Analisar' primeiro."
@@ -105,4 +115,11 @@ class ConclusionService:
             "based_on": based_on,
         }
         document["_id"] = self._conclusion_repository.insert(document)
+        logger.info(
+            "Conclusão gerada para %s: score=%.2f label=%s",
+            ticker,
+            overall_score,
+            label,
+            extra={"ticker": ticker},
+        )
         return document

@@ -5,12 +5,12 @@ Uso: python scripts/collect_and_analyze.py PETR4.SA [--name "Petrobras"]
 
 import argparse
 import json
-import logging
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from config.logging_setup import configure_logging  # noqa: E402
 from core.analyzers.base import AnalysisResult, AnalysisType  # noqa: E402
 from core.assets.asset_type import AssetType  # noqa: E402
 from persistence.schemas.indexes import ensure_indexes  # noqa: E402
@@ -29,7 +29,7 @@ def _serialize(result: AnalysisResult | None) -> dict | None:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ticker", help="Ticker B3 com sufixo .SA, ex: PETR4.SA")
     parser.add_argument("--name", default="", help="Nome do ativo (opcional)")

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -6,6 +7,8 @@ from conclusions.conclusion_service import ConclusionService
 from core.exceptions import RecommendationError
 from persistence.repositories.recommendation_repository import RecommendationRepository
 from recommendations.scoring import action_from_label, classify_agreement, classify_confidence
+
+logger = logging.getLogger(__name__)
 
 DISCLAIMER = (
     "Esta recomendação é gerada automaticamente com base em dados públicos e "
@@ -47,8 +50,13 @@ class RecommendationService:
         Levanta RecommendationError se não houver conclusão salva para o
         ativo (o usuário precisa gerar uma Conclusão primeiro).
         """
+        logger.info("Iniciando build_recommendation para %s", ticker, extra={"ticker": ticker})
+
         conclusion = self._conclusion_service.get_latest_conclusion(asset_id)
         if conclusion is None:
+            logger.warning(
+                "Não há conclusão salva para %s", ticker, extra={"ticker": ticker}
+            )
             raise RecommendationError(
                 f"Não há conclusão salva para '{ticker}'. Gere uma Conclusão primeiro."
             )
@@ -84,4 +92,11 @@ class RecommendationService:
             "missing_analyses": missing,
         }
         document["_id"] = self._recommendation_repository.insert(document)
+        logger.info(
+            "Recomendação gerada para %s: action=%s confidence=%s",
+            ticker,
+            action,
+            confidence,
+            extra={"ticker": ticker},
+        )
         return document

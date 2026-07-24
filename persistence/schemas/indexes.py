@@ -27,4 +27,8 @@ def ensure_indexes(db: Database | None = None) -> list[str]:
 
     created.append(database["raw_data"].create_index([("ticker", 1), ("fetched_at", -1)]))
 
+    created.append(
+        database["logs"].create_index("timestamp", expireAfterSeconds=30 * 24 * 3600)
+    )
+
     return created
