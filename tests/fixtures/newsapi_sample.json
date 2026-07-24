@@ -1,0 +1,27 @@
+{
+  "status": "ok",
+  "totalResults": 3,
+  "articles": [
+    {
+      "source": {"id": null, "name": "InfoMoney"},
+      "title": "Petrobras registra lucro recorde no trimestre",
+      "description": "Resultado positivo supera expectativas do mercado",
+      "url": "https://example.com/1",
+      "publishedAt": "2026-07-20T10:00:00Z"
+    },
+    {
+      "source": {"id": null, "name": "Valor Econômico"},
+      "title": "Petrobras enfrenta queda no lucro em meio a crise",
+      "description": "Prejuizo preocupa investidores no curto prazo",
+      "url": "https://example.com/2",
+      "publishedAt": "2026-07-21T10:00:00Z"
+    },
+    {
+      "source": {"id": null, "name": "Reuters Brasil"},
+      "title": "Petrobras anuncia nova reuniao de diretoria",
+      "description": "Encontro discute pauta administrativa",
+      "url": "https://example.com/3",
+      "publishedAt": "2026-07-22T10:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+[project]
+name = "finantial-advisor"
+version = "0.1.0"
+description = "Sistema de orientação financeira baseado em análises de mercado"
+requires-python = ">=3.12"

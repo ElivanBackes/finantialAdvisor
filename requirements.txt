@@ -1,0 +1,15 @@
+streamlit>=1.38
+pymongo>=4.8
+python-dotenv>=1.0
+requests>=2.32
+yfinance>=0.2.40
+pandas>=2.2
+
+# Etapa 2 não exigiu dependências novas: RSI/MACD/SMA calculados manualmente
+# com pandas, notícias via NewsAPI usando requests puro, sentimento via
+# léxico PT-BR (stdlib re/unicodedata).
+#
+# Candidatas para etapas futuras:
+# beautifulsoup4       # scraping de fontes sem API
+# lxml
+# pydantic-settings    # validação de configuração, quando settings.py crescer

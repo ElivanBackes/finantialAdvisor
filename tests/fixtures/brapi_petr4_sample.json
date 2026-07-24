@@ -1,0 +1,19 @@
+{
+  "results": [
+    {
+      "symbol": "PETR4",
+      "shortName": "PETROBRAS PN",
+      "regularMarketPrice": 38.42,
+      "priceEarnings": 5.1,
+      "marketCap": 499000000000,
+      "defaultKeyStatistics": {
+        "priceToBook": 1.28
+      },
+      "financialData": {
+        "returnOnEquity": 0.34,
+        "debtToEquity": 44.5
+      }
+    }
+  ],
+  "requestedAt": "2026-07-24T00:00:00.000Z"
+}
