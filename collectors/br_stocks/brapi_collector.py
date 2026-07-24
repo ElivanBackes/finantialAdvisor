@@ -12,8 +12,12 @@ _BASE_URL = "https://brapi.dev/api/quote/{ticker}"
 class BrapiCollector:
     """Collector de ações B3 via brapi.dev (AssetType.BR_STOCK).
 
-    Fonte alternativa/complementar ao YFinanceCollector — funciona sem
-    BRAPI_API_TOKEN (com rate limit menor); usa o token do .env se presente.
+    Fonte alternativa/complementar ao YFinanceCollector. A brapi.dev passou
+    a exigir token de autenticação em toda requisição (confirmado
+    empiricamente: até o endpoint de cotação simples, sem `fundamental`/
+    `modules`, retorna 401 "Token de autenticação não fornecido" sem
+    token) — não funciona mais sem BRAPI_API_TOKEN configurado, ao
+    contrário do que se assumia originalmente.
     """
 
     source_name = "brapi.dev"
@@ -23,11 +27,20 @@ class BrapiCollector:
         self._timeout = timeout
 
     def fetch(self, asset: Asset) -> RawData:
-        bare_ticker = asset.ticker.removesuffix(".SA")
         settings = get_settings()
-        params = {"fundamental": "true", "modules": "defaultKeyStatistics,financialData"}
-        if settings.brapi_api_token:
-            params["token"] = settings.brapi_api_token
+        if not settings.brapi_api_token:
+            raise CollectorError(
+                "brapi.dev: BRAPI_API_TOKEN ausente no .env — a brapi.dev passou a exigir "
+                "token de autenticação em toda requisição. Obtenha um token gratuito em "
+                "https://brapi.dev e configure BRAPI_API_TOKEN para habilitar esta fonte."
+            )
+
+        bare_ticker = asset.ticker.removesuffix(".SA")
+        params = {
+            "fundamental": "true",
+            "modules": "defaultKeyStatistics,financialData",
+            "token": settings.brapi_api_token,
+        }
 
         try:
             response = requests.get(

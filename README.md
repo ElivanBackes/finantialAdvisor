@@ -65,7 +65,7 @@ Variáveis em `.env`:
 |---|---|---|
 | `MONGO_URI` / `MONGO_DB_NAME` | Não (tem default) | Conexão com o Mongo local |
 | `NEWSAPI_KEY` | Só para a análise de notícias | Chave gratuita em [newsapi.org/register](https://newsapi.org/register) |
-| `BRAPI_API_TOKEN` | Não | Token opcional do brapi.dev (funciona sem, com rate limit menor) |
+| `BRAPI_API_TOKEN` | Só para a fonte brapi.dev | A brapi.dev passou a exigir token em toda requisição — sem ele, essa fonte é pulada (isolado, não quebra as outras análises, que seguem funcionando via yfinance/NewsAPI). Token gratuito em [brapi.dev](https://brapi.dev) |
 
 ## Como usar
 
@@ -141,6 +141,9 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
   simples para o MVP, não calibradas com dados históricos reais.
 - NewsAPI (free tier) cobre só notícias do último mês e não deve ser usada
   em produção — ok para uso pessoal/MVP.
+- brapi.dev passou a exigir `BRAPI_API_TOKEN` em toda requisição (mudança de
+  política da API, não do nosso código) — sem token, essa fonte é pulada e
+  as análises seguem funcionando só com yfinance/NewsAPI.
 - Expansão natural: novos `AssetType` (cripto, ações internacionais, renda
   fixa/passivos) exigem apenas novos `collectors/` + adaptar os
   `analyzers/` existentes ou criar novos — o `core/` não precisa mudar.
