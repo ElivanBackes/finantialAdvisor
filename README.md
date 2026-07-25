@@ -65,7 +65,7 @@ Variáveis em `.env`:
 |---|---|---|
 | `MONGO_URI` / `MONGO_DB_NAME` | Não (tem default) | Conexão com o Mongo local |
 | `NEWSAPI_KEY` | Só para a análise de notícias | Chave gratuita em [newsapi.org/register](https://newsapi.org/register) |
-| `BRAPI_API_TOKEN` | Só para a fonte brapi.dev | A brapi.dev passou a exigir token em toda requisição — sem ele, essa fonte é pulada (isolado, não quebra as outras análises, que seguem funcionando via yfinance/NewsAPI). Token gratuito em [brapi.dev](https://brapi.dev) |
+| `BRAPI_API_TOKEN` | Só para a fonte brapi.dev | A brapi.dev passou a exigir token em toda requisição — sem ele, essa fonte é pulada (isolado, não quebra as outras análises, que seguem funcionando via yfinance/NewsAPI). Token gratuito em [brapi.dev](https://brapi.dev) — o app só usa a cotação simples, compatível com o plano gratuito |
 
 ## Como usar
 
@@ -75,7 +75,7 @@ Variáveis em `.env`:
 streamlit run app.py
 ```
 
-Abre em `http://localhost:8501` com 5 páginas na barra lateral:
+Abre em `http://localhost:8501` com 6 páginas na barra lateral:
 
 1. **Buscar Ativo**: informe um ticker B3 com sufixo `.SA` (ex: `PETR4.SA`),
    clique em "Buscar / Cadastrar" e depois em "Coletar e Analisar".
@@ -84,6 +84,8 @@ Abre em `http://localhost:8501` com 5 páginas na barra lateral:
 3. **Conclusão e Recomendação**: botões "Gerar Conclusão" e "Gerar
    Recomendação" (nessa ordem — a recomendação consome a última conclusão
    salva, não recalcula nada sozinha).
+4. **Logs**: histórico de execução persistido no MongoDB (ver seção
+   [Logs](#logs) abaixo) — filtro por nível e por ticker.
 
 ### Via linha de comando (sem Streamlit)
 
@@ -110,6 +112,25 @@ collectors, analyzers, scoring de conclusão/recomendação e orquestração dos
 services. `scripts/*.py` servem como testes de integração manuais contra as
 APIs e o Mongo reais.
 
+Para testar o dashboard de ponta a ponta num navegador headless (Playwright),
+use a skill `.claude/skills/run-finantialadvisor/` — documenta setup, um
+driver que dirige o app inteiro (cadastrar → coletar → concluir → recomendar,
+com screenshot em cada etapa) e os principais gotchas já encontrados.
+
+## Logs
+
+Todo log a partir de `INFO` (início/sucesso/falha de cada operação) é
+persistido na coleção `logs` do MongoDB — não só no `stdout`/`stderr` do
+processo, que costuma ficar preso ao terminal de quem rodou o app.
+Configurado uma única vez por processo via `config/logging_setup.py`
+(`configure_logging()`, chamado em `app.py` e em todos os `scripts/*.py`).
+
+- **Ver na página "Logs" do dashboard** (filtro por nível/ticker), ou
+  consultar direto: `LogRepository().find_recent(limit=200, level=..., ticker=...)`.
+- Cada registro guarda `timestamp`, `level`, `logger`, `ticker` (quando
+  disponível) e `message`/`exception`.
+- Retenção: índice TTL de 30 dias — expira sozinho, sem limpeza manual.
+
 ## Estrutura de pastas
 
 ```
@@ -120,7 +141,7 @@ conclusions/     síntese das 3 análises em um score + rótulo
 recommendations/ veredito final (ação + confiança + justificativa)
 persistence/     repositórios MongoDB e definição de índices
 services/        orquestração (AssetService: coleta -> análises)
-config/          configuração (.env, conexão Mongo)
+config/          configuração (.env, conexão Mongo, logging_setup.py)
 dashboard/       app Streamlit (páginas e componentes)
 scripts/         scripts manuais (um por etapa do pipeline)
 tests/           testes automatizados (espelha a estrutura acima)
@@ -143,7 +164,11 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
   em produção — ok para uso pessoal/MVP.
 - brapi.dev passou a exigir `BRAPI_API_TOKEN` em toda requisição (mudança de
   política da API, não do nosso código) — sem token, essa fonte é pulada e
-  as análises seguem funcionando só com yfinance/NewsAPI.
+  as análises seguem funcionando só com yfinance/NewsAPI. O collector só usa
+  a cotação simples (compatível com o plano gratuito do token).
+- yfinance exige o sufixo `.SA` para tickers da B3 (ex: `PETR4.SA`, não
+  `PETR4`) — sem ele, a coleta falha para essa fonte; o app não valida/
+  normaliza isso automaticamente ainda.
 - Expansão natural: novos `AssetType` (cripto, ações internacionais, renda
   fixa/passivos) exigem apenas novos `collectors/` + adaptar os
   `analyzers/` existentes ou criar novos — o `core/` não precisa mudar.
