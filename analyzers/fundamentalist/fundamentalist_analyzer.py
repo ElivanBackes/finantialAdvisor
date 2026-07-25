@@ -12,6 +12,11 @@ _YF_FIELD_MAP = {
     "market_cap": "marketCap",
     "price": "currentPrice",
     "eps": "trailingEps",
+    "payout_ratio": "payoutRatio",
+    "fcf": "freeCashflow",
+    "ev_ebitda": "enterpriseToEbitda",
+    "earnings_growth": "earningsGrowth",
+    "revenue_growth": "revenueGrowth",
 }
 
 # Nomes de campo do brapi.dev (modules=defaultKeyStatistics,financialData).
@@ -24,7 +29,8 @@ _BRAPI_FIELD_MAP = {
 
 
 class FundamentalistAnalyzer:
-    """Análise fundamentalista: P/L, P/VP, Dividend Yield, ROE, endividamento.
+    """Análise fundamentalista: P/L, P/VP, Dividend Yield, ROE, endividamento,
+    payout, fluxo de caixa livre, EV/EBITDA e crescimento (lucro/receita).
 
     Prefere dados do yfinance; usa brapi.dev como fallback por campo quando
     o yfinance não trouxer o indicador.

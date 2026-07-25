@@ -67,6 +67,30 @@ def test_analyze_maps_eps_from_yfinance_trailing_eps():
     assert result.data["field_sources"]["eps"] == "yfinance"
 
 
+def test_analyze_maps_fase2_fields_from_yfinance():
+    asset = Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
+    yf_raw = RawData(
+        source="yfinance",
+        payload={
+            "info": {
+                "payoutRatio": 0.3117,
+                "freeCashflow": 82932752384,
+                "enterpriseToEbitda": 4.272,
+                "earningsGrowth": -0.072,
+                "revenueGrowth": 0.004,
+            }
+        },
+    )
+
+    result = FundamentalistAnalyzer().analyze(asset, [yf_raw])
+
+    assert result.data["payout_ratio"] == 0.3117
+    assert result.data["fcf"] == 82932752384
+    assert result.data["ev_ebitda"] == 4.272
+    assert result.data["earnings_growth"] == -0.072
+    assert result.data["revenue_growth"] == 0.004
+
+
 def test_analyze_raises_when_no_data():
     asset = Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
 

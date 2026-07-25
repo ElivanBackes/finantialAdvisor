@@ -78,7 +78,7 @@ def test_build_conclusion_all_three_present():
     result = service.build_conclusion(ObjectId(), "PETR4.SA")
 
     assert result["missing_analyses"] == []
-    assert result["overall_score"] == 48.13
+    assert result["overall_score"] == 50.3
     assert result["label"] == "favoravel"
     assert result["based_on"]["fundamentalist_analysis_id"] == _FUNDAMENTALIST_DOC["_id"]
     assert result["based_on"]["technical_analysis_id"] == _TECHNICAL_DOC["_id"]
@@ -101,7 +101,7 @@ def test_build_conclusion_missing_one_redistributes_weight():
 
     assert result["missing_analyses"] == ["technical"]
     assert result["based_on"]["technical_analysis_id"] is None
-    assert result["overall_score"] == round((75.71 + 42.0) / 2, 2)
+    assert result["overall_score"] == round((82.22 + 42.0) / 2, 2)
 
 
 def test_build_conclusion_all_missing_raises():

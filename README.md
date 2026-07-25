@@ -27,7 +27,9 @@ Buscar/Cadastrar → Coletar e Analisar → Gerar Conclusão → Gerar Recomenda
    [NewsAPI](https://newsapi.org/) para notícias — salvos em `raw_data`.
 2. **3 análises independentes** (`analyzers/`), cada uma com seu próprio
    schema e fontes, mas podendo compartilhar dados brutos entre si:
-   - **Fundamentalista**: P/L, P/VP, Dividend Yield, ROE, endividamento.
+   - **Fundamentalista**: P/L, P/VP, Dividend Yield (com payout como
+     modificador de sustentabilidade), ROE, endividamento, EV/EBITDA, FCF
+     yield e crescimento (lucro/receita).
    - **Técnica**: médias móveis (SMA 20/50/200), RSI(14), MACD, tendência.
    - **Notícias/Sentimento**: score de sentimento (léxico PT-BR) sobre
      notícias recentes do ativo.
@@ -35,11 +37,15 @@ Buscar/Cadastrar → Coletar e Analisar → Gerar Conclusão → Gerar Recomenda
    normalizado (-100 a +100); a média das disponíveis (redistribuindo peso
    se alguma faltar) gera um `overall_score` + rótulo `favoravel` /
    `neutro` / `desfavoravel`. O sub-score fundamentalista é uma **composição
-   ponderada** (não média simples): valuation 30%, P/VP 20%, Dividend Yield
-   15%, P/L 15%, ROE 10%, endividamento 10% — pesos redistribuídos entre os
-   critérios disponíveis quando algum falta. **Valuation** compara o preço
-   atual a um preço-teto conservador (o menor entre a fórmula de Graham,
-   `sqrt(22.5 x LPA x VPA)`, e a de Bazin, `DPA / 6%`).
+   ponderada** (não média simples): valuation 30%, Dividend Yield 15%, ROE
+   10%, crescimento 10%, FCF yield 10%, endividamento 10%, EV/EBITDA 5%,
+   P/L 5%, P/VP 5% — pesos redistribuídos entre os critérios disponíveis
+   quando algum falta. **Valuation** compara o preço atual a um preço-teto
+   conservador (o menor entre a fórmula de Graham, `sqrt(22.5 x LPA x
+   VPA)`, e a de Bazin, `DPA / 6%`). **Payout** não tem peso próprio —
+   funciona como modificador: payout acima de 60% reduz a nota do dividend
+   yield proporcionalmente (a spec explicitamente proíbe recomendar compra
+   só pelo DY).
 4. **Recomendação** (`recommendations/`): classifica o ativo em uma de 5
    categorias — `Compra Forte` / `Comprar` / `Aguardar` / `Manter` /
    `Revisão Necessária` — a partir do sub-score fundamentalista (que já
@@ -188,6 +194,16 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
   antigo (`action`: comprar/manter/evitar) — o dashboard detecta e pede para
   gerar uma nova recomendação em vez de quebrar, mas não há migração
   automática dos documentos antigos.
-- Próximos passos mapeados (Fases 2-4 do modelo de valuation): payout ratio,
-  FCF, EV/EBITDA, crescimento (CAGR), estratégia de alocação de carteira,
-  cenário macroeconômico setorial e histórico de múltiplos.
+- Crescimento e FCF yield usam o dado de um único período do yfinance
+  (`earningsGrowth`/`revenueGrowth`/`freeCashflow`), não o CAGR de 3/5/10
+  anos da especificação (exigiria coletar demonstrativos financeiros
+  multi-ano) — aproximação aceitável para o MVP2.
+- EV/EBITDA e FCF costumam vir ausentes para bancos/seguradoras no yfinance
+  (ex: ITUB4.SA) — o scoring já trata como ausente e redistribui o peso, sem
+  quebrar a análise.
+- ROIC, histórico real de múltiplos e qualidade da gestão (5% cada na
+  especificação) ainda não têm fonte de dado — peso redistribuído entre
+  EV/EBITDA, P/L e P/VP até serem implementados.
+- Próximos passos mapeados (Fases 3-4 do modelo de valuation): estratégia de
+  alocação de carteira, cenário macroeconômico setorial e histórico real de
+  múltiplos (CAGR multi-ano, ROIC, qualidade da gestão).

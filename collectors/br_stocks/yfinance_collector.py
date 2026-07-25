@@ -27,6 +27,11 @@ _RELEVANT_INFO_FIELDS = [
     "trailingEps",
     "totalDebt",
     "totalCash",
+    "payoutRatio",
+    "freeCashflow",
+    "enterpriseToEbitda",
+    "earningsGrowth",
+    "revenueGrowth",
 ]
 
 
