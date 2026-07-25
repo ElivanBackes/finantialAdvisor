@@ -1,6 +1,10 @@
 import pytest
 
 from conclusions.scoring import (
+    _score_dividend_yield,
+    _score_ev_ebitda,
+    _score_fcf_yield,
+    _score_growth,
     _score_valuation,
     overall_label,
     score_fundamentalist,
@@ -10,8 +14,9 @@ from conclusions.scoring import (
 
 
 def test_score_fundamentalist_petr4_like_without_price_is_favorable():
-    """Sem `price`/`eps`, o critério de valuation fica ausente e o peso é
-    redistribuído entre os demais (pl 15, pvp 20, dy 15, roe 10, debt 10).
+    """Sem `price`/`eps`/payout/fcf/ev_ebitda/growth, só pl/pvp/dy/roe/debt
+    estão disponíveis — o peso dos demais critérios é redistribuído entre
+    eles.
     """
     data = {
         "pl": 5.202952,
@@ -22,7 +27,7 @@ def test_score_fundamentalist_petr4_like_without_price_is_favorable():
     }
     score, highlights = score_fundamentalist(data)
 
-    assert score == 75.71
+    assert score == 82.22
     assert len(highlights) == 3
 
 
@@ -41,7 +46,7 @@ def test_score_fundamentalist_petr4_like_with_valuation_included():
     }
     score, highlights = score_fundamentalist(data)
 
-    assert score == 83.0
+    assert score == 89.33
     assert any("preço-teto" in h for h in highlights)
 
 
@@ -97,6 +102,88 @@ def test_score_valuation_conservative_takes_the_lower_of_graham_and_bazin():
     assert "58.20" in highlight
     assert "76.5" not in highlight
     assert score == 100.0
+
+
+@pytest.mark.parametrize(
+    "earnings_growth,revenue_growth,expected_score",
+    [
+        (-0.30, None, -100.0),
+        (-0.10, None, -50.0),
+        (0.02, None, 0.0),
+        (0.10, None, 50.0),
+        (0.25, None, 80.0),
+        (0.40, None, 100.0),
+        (0.10, 0.20, 80.0),  # média (15%) -> banda "bom crescimento"
+    ],
+)
+def test_score_growth_bands(earnings_growth, revenue_growth, expected_score):
+    score, highlight = _score_growth(earnings_growth, revenue_growth)
+
+    assert score == expected_score
+    assert highlight is not None
+
+
+def test_score_growth_absent_without_any_data():
+    assert _score_growth(None, None) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "fcf,market_cap,expected_score",
+    [(-100, 1000, -100.0), (20, 1000, 20.0), (50, 1000, 50.0), (80, 1000, 80.0), (150, 1000, 100.0)],
+)
+def test_score_fcf_yield_bands(fcf, market_cap, expected_score):
+    score, highlight = _score_fcf_yield(fcf, market_cap)
+
+    assert score == expected_score
+    assert highlight is not None
+
+
+def test_score_fcf_yield_absent_without_market_cap():
+    assert _score_fcf_yield(100.0, None) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "ev_ebitda,expected_score",
+    [(-1, -100.0), (3, 90.0), (6, 60.0), (10, 0.0), (15, -50.0), (25, -100.0)],
+)
+def test_score_ev_ebitda_bands(ev_ebitda, expected_score):
+    score, highlight = _score_ev_ebitda(ev_ebitda)
+
+    assert score == expected_score
+    assert highlight is not None
+
+
+def test_score_ev_ebitda_absent_without_data():
+    assert _score_ev_ebitda(None) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "payout_ratio,expected_score",
+    [
+        (0.31, 100.0),  # payout saudável, sem penalidade
+        (0.70, 85.0),
+        (0.95, 60.0),
+        (1.5, 35.0),
+        (None, 100.0),  # payout desconhecido, sem penalidade
+        (-0.2, 50.0),  # payout negativo, penalidade forte
+    ],
+)
+def test_score_dividend_yield_payout_penalty(payout_ratio, expected_score):
+    score, highlight = _score_dividend_yield(9.07, payout_ratio)
+
+    assert score == expected_score
+    if payout_ratio is not None and not (0 <= payout_ratio * 100 <= 60):
+        assert "Payout" in highlight
+
+
+def test_score_dividend_yield_no_payout_penalty_when_no_dividend():
+    """DY <= 0 não paga dividendo — payout não deve alterar o score nem
+    entrar na mensagem.
+    """
+    score, highlight = _score_dividend_yield(0.0, payout_ratio=2.0)
+
+    assert score == 0.0
+    assert "Payout" not in highlight
 
 
 def test_score_technical_strong_positive():

@@ -50,19 +50,47 @@ def _score_pvp(pvp: float | None) -> tuple[float | None, str | None]:
     return -100.0, "P/VP igual ou acima de 3 (considerado caro)."
 
 
-def _score_dividend_yield(dy: float | None) -> tuple[float | None, str | None]:
+def _payout_sustainability_factor(payout_ratio: float | None) -> tuple[float, str | None]:
+    """O algoritmo nunca deve recomendar compra só pelo DY — payout muito
+    alto (ou negativo, sinal de lucro deficitário financiando dividendo)
+    reduz a nota de dividend yield, pois indica que a distribuição atual
+    pode não ser sustentável.
+    """
+    if payout_ratio is None:
+        return 1.0, None
+    payout_pct = payout_ratio * 100
+    if payout_pct < 0:
+        return 0.5, f"Payout negativo ({payout_pct:.1f}%) — dividendo pago apesar de prejuízo."
+    if payout_pct <= 60:
+        return 1.0, None
+    if payout_pct <= 80:
+        return 0.85, f"Payout de {payout_pct:.1f}% começa a pressionar a sustentabilidade do dividendo."
+    if payout_pct <= 100:
+        return 0.6, f"Payout de {payout_pct:.1f}% é elevado — sustentabilidade do dividendo exige atenção."
+    return 0.35, f"Payout de {payout_pct:.1f}% (acima de 100% do lucro) — dividendo pode não ser sustentável."
+
+
+def _score_dividend_yield(
+    dy: float | None, payout_ratio: float | None = None
+) -> tuple[float | None, str | None]:
     if dy is None:
         return None, None
     dy_pct = _normalize_percent(dy)
     if dy_pct <= 0:
         return 0.0, "Sem distribuição de dividendos (não é necessariamente ruim)."
     if dy_pct < 3:
-        return 30.0, f"Dividend yield baixo (~{dy_pct:.2f}%)."
-    if dy_pct < 6:
-        return 65.0, f"Dividend yield moderado (~{dy_pct:.2f}%)."
-    if dy_pct < 9:
-        return 90.0, f"Dividend yield bom (~{dy_pct:.2f}%)."
-    return 100.0, f"Dividend yield de {dy_pct:.2f}% é considerado forte."
+        base_score, base_text = 30.0, f"Dividend yield baixo (~{dy_pct:.2f}%)."
+    elif dy_pct < 6:
+        base_score, base_text = 65.0, f"Dividend yield moderado (~{dy_pct:.2f}%)."
+    elif dy_pct < 9:
+        base_score, base_text = 90.0, f"Dividend yield bom (~{dy_pct:.2f}%)."
+    else:
+        base_score, base_text = 100.0, f"Dividend yield de {dy_pct:.2f}% é considerado forte."
+
+    factor, payout_note = _payout_sustainability_factor(payout_ratio)
+    if factor == 1.0:
+        return base_score, base_text
+    return round(base_score * factor, 2), f"{base_text} {payout_note}"
 
 
 def _score_roe(roe: float | None) -> tuple[float | None, str | None]:
@@ -169,18 +197,83 @@ def _score_valuation(data: dict) -> tuple[float | None, str | None]:
     )
 
 
-# Pesos do score fundamentalista (Fase 1 da especificação de valuation).
-# Valuation assume o peso de maior importância (30%, dominante segundo a
-# spec); PL e PVP seguem como proxy de "histórico de múltiplos" até que
-# ROIC/FCF/payout/EV-EBITDA/crescimento sejam incorporados (Fase 2).
+# Pesos do score fundamentalista, seguindo a tabela de pesos da
+# especificação (Fase 2: adiciona crescimento, FCF e EV/EBITDA; payout entra
+# como modificador do dividend_yield, não como peso próprio, conforme a spec
+# o descreve como "complementar"). ROIC, histórico real de múltiplos e
+# qualidade da gestão (5% cada na spec) ainda não têm fonte de dado e ficam
+# redistribuídos entre EV/EBITDA, PL e PVP até serem implementados.
 _FUNDAMENTALIST_WEIGHTS = {
     "valuation": 30,
     "dividend_yield": 15,
-    "pl": 15,
-    "pvp": 20,
     "roe": 10,
+    "growth": 10,
+    "fcf": 10,
     "debt_to_equity": 10,
+    "ev_ebitda": 5,
+    "pl": 5,
+    "pvp": 5,
 }
+
+
+def _score_ev_ebitda(ev_ebitda: float | None) -> tuple[float | None, str | None]:
+    if ev_ebitda is None:
+        return None, None
+    if ev_ebitda <= 0:
+        return -100.0, "EV/EBITDA negativo (EBITDA negativo) — sinal de alerta operacional."
+    if ev_ebitda <= 4:
+        return 90.0, f"EV/EBITDA baixo ({ev_ebitda:.2f}x), possível barganha operacional."
+    if ev_ebitda <= 8:
+        return 60.0, f"EV/EBITDA saudável ({ev_ebitda:.2f}x)."
+    if ev_ebitda <= 12:
+        return 0.0, f"EV/EBITDA neutro ({ev_ebitda:.2f}x)."
+    if ev_ebitda <= 18:
+        return -50.0, f"EV/EBITDA elevado ({ev_ebitda:.2f}x)."
+    return -100.0, f"EV/EBITDA muito elevado ({ev_ebitda:.2f}x) — operação cara frente ao EBITDA."
+
+
+def _score_growth(earnings_growth: float | None, revenue_growth: float | None) -> tuple[float | None, str | None]:
+    """Proxy de crescimento com o dado disponível (yfinance só expõe
+    crescimento do último período, não o CAGR de 3/5/10 anos da
+    especificação) — diferencia empresas maduras de empresas em expansão
+    até que dados históricos multi-ano sejam incorporados (Fase 3+).
+    """
+    candidates = [g for g in (earnings_growth, revenue_growth) if g is not None]
+    if not candidates:
+        return None, None
+    growth_pct = (sum(candidates) / len(candidates)) * 100
+    origem = "lucro e receita" if len(candidates) == 2 else ("lucro" if earnings_growth is not None else "receita")
+
+    if growth_pct <= -20:
+        return -100.0, f"Queda expressiva de {origem} ({growth_pct:.1f}%)."
+    if growth_pct <= -5:
+        return -50.0, f"Retração de {origem} ({growth_pct:.1f}%)."
+    if growth_pct <= 5:
+        return 0.0, f"Crescimento de {origem} estagnado ({growth_pct:.1f}%)."
+    if growth_pct <= 15:
+        return 50.0, f"Crescimento moderado de {origem} ({growth_pct:.1f}%)."
+    if growth_pct <= 30:
+        return 80.0, f"Bom crescimento de {origem} ({growth_pct:.1f}%)."
+    return 100.0, f"Forte crescimento de {origem} ({growth_pct:.1f}%)."
+
+
+def _score_fcf_yield(fcf: float | None, market_cap: float | None) -> tuple[float | None, str | None]:
+    """FCF Yield = FCF / market cap — normaliza o fluxo de caixa livre (valor
+    absoluto, não comparável entre empresas de tamanhos diferentes) contra o
+    tamanho da empresa, de forma análoga a um earnings yield.
+    """
+    if fcf is None or market_cap is None or market_cap <= 0:
+        return None, None
+    fcf_yield_pct = fcf / market_cap * 100
+    if fcf_yield_pct <= 0:
+        return -100.0, f"Fluxo de caixa livre negativo (yield {fcf_yield_pct:.1f}%) — queima de caixa."
+    if fcf_yield_pct < 3:
+        return 20.0, f"FCF yield baixo ({fcf_yield_pct:.1f}%)."
+    if fcf_yield_pct < 6:
+        return 50.0, f"FCF yield moderado ({fcf_yield_pct:.1f}%)."
+    if fcf_yield_pct < 10:
+        return 80.0, f"FCF yield bom ({fcf_yield_pct:.1f}%)."
+    return 100.0, f"FCF yield forte ({fcf_yield_pct:.1f}%), geração de caixa robusta."
 
 
 def score_fundamentalist(data: dict) -> tuple[float | None, list[str]]:
@@ -188,9 +281,12 @@ def score_fundamentalist(data: dict) -> tuple[float | None, list[str]]:
         "valuation": _score_valuation(data),
         "pl": _score_pl(data.get("pl")),
         "pvp": _score_pvp(data.get("pvp")),
-        "dividend_yield": _score_dividend_yield(data.get("dividend_yield")),
+        "dividend_yield": _score_dividend_yield(data.get("dividend_yield"), data.get("payout_ratio")),
         "roe": _score_roe(data.get("roe")),
         "debt_to_equity": _score_debt_to_equity(data.get("debt_to_equity")),
+        "ev_ebitda": _score_ev_ebitda(data.get("ev_ebitda")),
+        "growth": _score_growth(data.get("earnings_growth"), data.get("revenue_growth")),
+        "fcf": _score_fcf_yield(data.get("fcf"), data.get("market_cap")),
     }
     available = {key: pair for key, pair in scored.items() if pair[0] is not None}
     if not available:
