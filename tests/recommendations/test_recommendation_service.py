@@ -53,7 +53,8 @@ def test_build_recommendation_all_concordant_complete():
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
 
-    assert result["action"] == "comprar"
+    assert result["category"] == "comprar"  # sub_score 60 -> 8.0 na escala 0-10
+    assert result["fundamentalist_score_0_10"] == 8.0
     assert result["confidence"] == "alta"
     assert result["agreement"] == "concordante"
     assert result["disclaimer"] == DISCLAIMER
@@ -113,16 +114,22 @@ def test_build_recommendation_without_conclusion_raises():
 
 
 @pytest.mark.parametrize(
-    "label,expected_action",
-    [("favoravel", "comprar"), ("neutro", "manter"), ("desfavoravel", "evitar")],
+    "fundamentalist_sub_score,expected_category",
+    [(80.0, "compra_forte"), (60.0, "comprar"), (30.0, "aguardar"), (0.0, "manter"), (-50.0, "revisao_necessaria")],
 )
-def test_build_recommendation_label_to_action_mapping(label, expected_action):
+def test_build_recommendation_category_driven_by_fundamentalist_sub_score(
+    fundamentalist_sub_score, expected_category
+):
+    """A categoria vem do sub-score fundamentalista (que já embute
+    valuation), não do `label`/overall_score das 3 análises combinadas —
+    técnica e notícias continuam informativas mas não decidem a categoria.
+    """
     conclusion = _conclusion(
-        label,
+        "neutro",
         {
-            "fundamentalist": {"sub_score": 0.0, "highlights": []},
-            "technical": {"sub_score": 0.0, "highlights": []},
-            "news_sentiment": {"sub_score": 0.0, "highlights": []},
+            "fundamentalist": {"sub_score": fundamentalist_sub_score, "highlights": []},
+            "technical": {"sub_score": -80.0, "highlights": []},
+            "news_sentiment": {"sub_score": -80.0, "highlights": []},
         },
         [],
     )
@@ -133,4 +140,25 @@ def test_build_recommendation_label_to_action_mapping(label, expected_action):
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
 
-    assert result["action"] == expected_action
+    assert result["category"] == expected_category
+
+
+def test_build_recommendation_missing_fundamentalist_is_revisao_necessaria():
+    conclusion = _conclusion(
+        "neutro",
+        {
+            "fundamentalist": {"sub_score": None, "highlights": []},
+            "technical": {"sub_score": 60.0, "highlights": []},
+            "news_sentiment": {"sub_score": 60.0, "highlights": []},
+        },
+        ["fundamentalist"],
+    )
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["category"] == "revisao_necessaria"
+    assert result["fundamentalist_score_0_10"] is None

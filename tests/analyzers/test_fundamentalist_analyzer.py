@@ -57,6 +57,16 @@ def test_analyze_falls_back_to_brapi_when_yfinance_missing_field():
     assert result.data["field_sources"]["pl"] == "brapi.dev"
 
 
+def test_analyze_maps_eps_from_yfinance_trailing_eps():
+    asset = Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
+    yf_raw = RawData(source="yfinance", payload={"info": {"trailingEps": 8.28}})
+
+    result = FundamentalistAnalyzer().analyze(asset, [yf_raw])
+
+    assert result.data["eps"] == 8.28
+    assert result.data["field_sources"]["eps"] == "yfinance"
+
+
 def test_analyze_raises_when_no_data():
     asset = Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
 

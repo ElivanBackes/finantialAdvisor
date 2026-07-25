@@ -17,8 +17,20 @@ _ANALYSIS_DISPLAY = {
     "technical": "Técnica",
     "news_sentiment": "Notícias/Sentimento",
 }
-_ACTION_TEXT = {"comprar": "Comprar", "manter": "Manter", "evitar": "Evitar"}
-_ACTION_STYLE = {"comprar": st.success, "manter": st.warning, "evitar": st.error}
+_CATEGORY_TEXT = {
+    "compra_forte": "Compra Forte",
+    "comprar": "Comprar",
+    "aguardar": "Aguardar",
+    "manter": "Manter",
+    "revisao_necessaria": "Revisão Necessária",
+}
+_CATEGORY_STYLE = {
+    "compra_forte": st.success,
+    "comprar": st.success,
+    "aguardar": st.warning,
+    "manter": st.warning,
+    "revisao_necessaria": st.error,
+}
 _CONFIDENCE_TEXT = {"alta": "Alta", "media": "Média", "baixa": "Baixa"}
 _AGREEMENT_TEXT = {"concordante": "Concordante", "mista": "Mista", "neutra": "Neutra"}
 
@@ -26,6 +38,13 @@ st.title("🧭 Conclusão e Recomendação")
 
 asset_id_str = st.session_state.get("current_asset_id")
 ticker = st.session_state.get("current_asset_ticker")
+
+
+def _md_escape(text: str) -> str:
+    """Escapa `$` para o Streamlit não interpretar como delimitador de LaTeX
+    (ex: "R$ 42.21 ... R$ 64.93" vira fórmula matemática sem isso).
+    """
+    return text.replace("$", "\\$")
 
 
 def _render(conclusion: dict) -> None:
@@ -45,20 +64,29 @@ def _render(conclusion: dict) -> None:
         sub_score = entry.get("sub_score")
         st.write(f"Sub-score: {sub_score:+.1f}" if sub_score is not None else "Ausente.")
         for highlight in entry.get("highlights", []):
-            st.write(f"- {highlight}")
+            st.write(f"- {_md_escape(highlight)}")
     st.caption(f"Gerado em {conclusion['analyzed_at']}")
 
 
 def _render_recommendation(recommendation: dict) -> None:
-    style_fn = _ACTION_STYLE.get(recommendation["action"], st.info)
+    category = recommendation.get("category")
+    if category is None:
+        st.info(
+            "A última recomendação salva para este ativo usa um formato antigo "
+            "(anterior às 5 categorias de valuation). Gere uma nova recomendação."
+        )
+        return
+    score_0_10 = recommendation.get("fundamentalist_score_0_10")
+    style_fn = _CATEGORY_STYLE.get(category, st.info)
+    score_text = f" (nota {score_0_10:.1f}/10)" if score_0_10 is not None else ""
     style_fn(
-        f"Recomendação: {_ACTION_TEXT.get(recommendation['action'], recommendation['action'])} "
+        f"Recomendação: {_CATEGORY_TEXT.get(category, category)}{score_text} "
         f"(confiança {_CONFIDENCE_TEXT.get(recommendation['confidence'], recommendation['confidence'])}, "
         f"concordância {_AGREEMENT_TEXT.get(recommendation['agreement'], recommendation['agreement'])})"
     )
     st.write("Justificativa:")
     for item in recommendation["justification"]:
-        st.write(f"- {item}")
+        st.write(f"- {_md_escape(item)}")
     st.caption(recommendation["disclaimer"])
     st.caption(f"Gerado em {recommendation['analyzed_at']}")
 

@@ -11,6 +11,7 @@ _YF_FIELD_MAP = {
     "debt_to_equity": "debtToEquity",
     "market_cap": "marketCap",
     "price": "currentPrice",
+    "eps": "trailingEps",
 }
 
 # Nomes de campo do brapi.dev (modules=defaultKeyStatistics,financialData).
