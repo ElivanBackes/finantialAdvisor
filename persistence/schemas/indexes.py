@@ -17,6 +17,7 @@ def ensure_indexes(db: Database | None = None) -> list[str]:
     created: list[str] = []
 
     created.append(database["assets"].create_index("ticker", unique=True))
+    created.append(database["positions"].create_index("asset_id", unique=True))
 
     for collection_name in _ANALYSIS_COLLECTIONS:
         created.append(

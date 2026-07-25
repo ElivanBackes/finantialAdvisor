@@ -1,9 +1,10 @@
 # Financial Advisor
 
 Sistema de orientação financeira que coleta dados de mercado, roda 3
-análises independentes e sintetiza tudo em uma recomendação final —
-`comprar` / `manter` / `evitar` — sobre se vale a pena realizar um
-ativo/passivo/investimento.
+análises independentes e sintetiza tudo em uma recomendação final — uma de
+5 categorias (`Compra Forte` / `Comprar` / `Aguardar` / `Manter` / `Revisão
+Necessária`) — sobre se vale a pena realizar um novo aporte, já considerando
+valuation e a composição da carteira do usuário.
 
 **MVP**: ações da bolsa brasileira (B3). A arquitetura já é genérica o
 suficiente (`AssetType`) para suportar no futuro ações/ETFs internacionais,
@@ -52,11 +53,20 @@ Buscar/Cadastrar → Coletar e Analisar → Gerar Conclusão → Gerar Recomenda
    embute o valuation), convertido para uma nota 0-10. Técnica e
    notícias/sentimento não decidem a categoria, mas alimentam um sinal
    auxiliar de **concordância** e **confiança** (`alta`/`media`/`baixa`)
-   junto com a justificativa textual.
+   junto com a justificativa textual. Por fim, a **estratégia de alocação
+   de carteira** (`portfolio/`) é aplicada como último ajuste: se o usuário
+   registrou uma posição para o ativo (`Carteira`) e ele já está **acima**
+   da alocação-alvo, uma categoria `Compra Forte`/`Comprar` é rebaixada para
+   `Aguardar` — evita concentrar novos aportes em ativos já sobreponderados.
+   A alocação nunca *promove* uma categoria (fundamentos sempre têm
+   prioridade); registrar posição é opcional — sem ela, a recomendação
+   funciona exatamente como antes.
 
-Cada etapa persiste seu resultado no MongoDB de forma *append-only*
-(histórico completo, nunca sobrescreve), então o dashboard sempre mostra o
-resultado mais recente de cada estágio.
+Cada etapa de análise persiste seu resultado no MongoDB de forma
+*append-only* (histórico completo, nunca sobrescreve), então o dashboard
+sempre mostra o resultado mais recente de cada estágio. Posições de carteira
+(`positions`) são a exceção: como representam estado atual do usuário (não
+um evento histórico), são upsert por ativo — igual à coleção `assets`.
 
 ## Setup
 
@@ -89,7 +99,7 @@ Variáveis em `.env`:
 streamlit run app.py
 ```
 
-Abre em `http://localhost:8501` com 6 páginas na barra lateral:
+Abre em `http://localhost:8501` com 7 páginas na barra lateral:
 
 1. **Buscar Ativo**: informe um ticker B3 com sufixo `.SA` (ex: `PETR4.SA`),
    clique em "Buscar / Cadastrar" e depois em "Coletar e Analisar".
@@ -98,7 +108,11 @@ Abre em `http://localhost:8501` com 6 páginas na barra lateral:
 3. **Conclusão e Recomendação**: botões "Gerar Conclusão" e "Gerar
    Recomendação" (nessa ordem — a recomendação consome a última conclusão
    salva, não recalcula nada sozinha).
-4. **Logs**: histórico de execução persistido no MongoDB (ver seção
+4. **Carteira** (opcional): registre quantidade possuída, preço médio e
+   alocação-alvo (%) do ativo selecionado. Mostra a alocação atual calculada
+   (valor da posição / valor total da carteira, usando o preço mais recente
+   coletado) e uma tabela com todas as posições cadastradas.
+5. **Logs**: histórico de execução persistido no MongoDB (ver seção
    [Logs](#logs) abaixo) — filtro por nível e por ticker.
 
 ### Via linha de comando (sem Streamlit)
@@ -152,7 +166,8 @@ core/            abstrações centrais: Asset, AssetType, Collector, Analyzer
 collectors/      coleta de dados brutos (yfinance, brapi.dev, NewsAPI)
 analyzers/       as 3 análises (fundamentalista, técnica, sentimento)
 conclusions/     síntese das 3 análises em um score + rótulo
-recommendations/ veredito final (ação + confiança + justificativa)
+recommendations/ veredito final (categoria + confiança + justificativa)
+portfolio/       posições da carteira do usuário e cálculo de alocação
 persistence/     repositórios MongoDB e definição de índices
 services/        orquestração (AssetService: coleta -> análises)
 config/          configuração (.env, conexão Mongo, logging_setup.py)
@@ -204,6 +219,14 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
 - ROIC, histórico real de múltiplos e qualidade da gestão (5% cada na
   especificação) ainda não têm fonte de dado — peso redistribuído entre
   EV/EBITDA, P/L e P/VP até serem implementados.
-- Próximos passos mapeados (Fases 3-4 do modelo de valuation): estratégia de
-  alocação de carteira, cenário macroeconômico setorial e histórico real de
-  múltiplos (CAGR multi-ano, ROIC, qualidade da gestão).
+- A alocação-alvo é um número fixo por ativo (sem tolerância/banda de
+  rebalanceamento) — qualquer alocação acima da meta, por menor que seja,
+  já rebaixa uma categoria atrativa para "Aguardar".
+- O "valor atual" de cada posição usa o preço mais recente da análise
+  fundamentalista já coletada (não busca cotação em tempo real) — cai para
+  o preço médio de compra se o ativo ainda não foi coletado/analisado.
+- Registrar posição é opt-in e por ativo, um de cada vez, na página
+  "Carteira" — não há import em lote (ex: CSV da corretora).
+- Próximos passos mapeados (Fase 4 do modelo de valuation): cenário
+  macroeconômico setorial e histórico real de múltiplos (CAGR multi-ano,
+  ROIC, qualidade da gestão).

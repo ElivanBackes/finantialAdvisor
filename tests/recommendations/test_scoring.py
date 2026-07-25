@@ -1,12 +1,33 @@
 import pytest
 
 from recommendations.scoring import (
+    apply_allocation_adjustment,
     classify_agreement,
     classify_confidence,
     classify_direction,
     classify_recommendation,
     to_zero_ten_scale,
 )
+
+
+@pytest.mark.parametrize(
+    "category,allocation_status,expected_category,expected_adjusted",
+    [
+        ("compra_forte", "acima", "aguardar", True),
+        ("comprar", "acima", "aguardar", True),
+        ("compra_forte", "dentro", "compra_forte", False),
+        ("comprar", "abaixo", "comprar", False),
+        ("aguardar", "acima", "aguardar", False),
+        ("manter", "acima", "manter", False),
+        ("revisao_necessaria", "acima", "revisao_necessaria", False),
+        ("comprar", None, "comprar", False),
+    ],
+)
+def test_apply_allocation_adjustment(category, allocation_status, expected_category, expected_adjusted):
+    result_category, adjusted = apply_allocation_adjustment(category, allocation_status)
+
+    assert result_category == expected_category
+    assert adjusted == expected_adjusted
 
 
 @pytest.mark.parametrize(

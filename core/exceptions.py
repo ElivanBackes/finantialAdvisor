@@ -23,3 +23,7 @@ class ConclusionError(FinancialAdvisorError):
 
 class RecommendationError(FinancialAdvisorError):
     """Levantada quando não há conclusão salva para gerar uma recomendação."""
+
+
+class PortfolioError(FinancialAdvisorError):
+    """Levantada quando dados de posição de carteira são inválidos."""

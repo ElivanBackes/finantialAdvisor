@@ -29,6 +29,22 @@ def to_zero_ten_scale(score: float) -> float:
     return round((score + 100) / 20, 2)
 
 
+def apply_allocation_adjustment(category: str, allocation_status: str | None) -> tuple[str, bool]:
+    """Estratégia de alocação de carteira (Etapa 4): só rebaixa uma
+    recomendação já atrativa quando o ativo está acima da alocação-alvo,
+    para evitar concentrar novos aportes em ativos sobreponderados. Nunca
+    promove um ativo pouco atrativo por estar abaixo da meta — fundamentos
+    sempre têm prioridade sobre alocação (princípio da especificação:
+    "empresas excelentes podem não representar boas compras no momento",
+    o inverso também vale: alocação não torna uma empresa fraca atrativa).
+
+    Retorna (categoria_final, foi_ajustada).
+    """
+    if allocation_status == "acima" and category in ("compra_forte", "comprar"):
+        return "aguardar", True
+    return category, False
+
+
 def classify_recommendation(fundamentalist_sub_score: float | None) -> tuple[str, float | None]:
     """Classifica em uma das 5 categorias da especificação a partir do
     sub-score fundamentalista (que já inclui o critério de valuation).
