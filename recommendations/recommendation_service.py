@@ -6,7 +6,7 @@ from bson import ObjectId
 from conclusions.conclusion_service import ConclusionService
 from core.exceptions import RecommendationError
 from persistence.repositories.recommendation_repository import RecommendationRepository
-from recommendations.scoring import action_from_label, classify_agreement, classify_confidence
+from recommendations.scoring import classify_agreement, classify_confidence, classify_recommendation
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +16,31 @@ DISCLAIMER = (
 )
 
 _AGREEMENT_TEXT = {
-    "concordante": "Os sinais disponíveis apontam na mesma direção.",
-    "mista": "Os sinais disponíveis são conflitantes entre si.",
-    "neutra": "Os sinais disponíveis não indicam uma direção clara.",
+    "concordante": "Os sinais técnicos e de sentimento apontam na mesma direção do fundamentalista.",
+    "mista": "Os sinais técnicos e de sentimento são conflitantes entre si.",
+    "neutra": "Os sinais técnicos e de sentimento não indicam uma direção clara.",
 }
 
 _CONFIDENCE_TEXT = {
     "alta": "Confiança alta: todas as análises estão disponíveis e concordam entre si.",
     "media": "Confiança média: análises incompletas ou parcialmente divergentes.",
     "baixa": "Confiança baixa: poucas análises disponíveis e/ou sinais conflitantes.",
+}
+
+# Categorias da especificação de valuation (score 0-10 do sub-score
+# fundamentalista, que já embute o critério de preço-teto/margem de segurança).
+_CATEGORY_TEXT = {
+    "compra_forte": "Compra Forte: excelente empresa negociando com grande margem de segurança.",
+    "comprar": "Comprar: ativo atrativo, com potencial de valorização consistente.",
+    "aguardar": (
+        "Aguardar: empresa de qualidade, porém sem margem de segurança adequada "
+        "ou com fatores conjunturais desfavoráveis."
+    ),
+    "manter": "Manter: sem novos aportes no momento; acompanhar evolução dos fundamentos.",
+    "revisao_necessaria": (
+        "Revisão Necessária: dados fundamentalistas insuficientes ou score muito "
+        "baixo — avaliar deterioração dos fundamentos antes de decidir."
+    ),
 }
 
 
@@ -67,11 +83,11 @@ class RecommendationService:
 
         agreement = classify_agreement(breakdown)
         confidence = classify_confidence(available_count, agreement)
-        action = action_from_label(conclusion["label"])
+        fundamentalist_sub_score = breakdown.get("fundamentalist", {}).get("sub_score")
+        category, fundamentalist_score_0_10 = classify_recommendation(fundamentalist_sub_score)
 
-        justification: list[str] = []
-        for entry in breakdown.values():
-            justification.extend(entry.get("highlights", []))
+        justification: list[str] = [_CATEGORY_TEXT[category]]
+        justification.extend(breakdown.get("fundamentalist", {}).get("highlights", []))
         justification.append(_AGREEMENT_TEXT[agreement])
         justification.append(_CONFIDENCE_TEXT[confidence])
         if missing:
@@ -81,7 +97,8 @@ class RecommendationService:
             "asset_id": asset_id,
             "ticker": ticker,
             "analyzed_at": datetime.now(timezone.utc),
-            "action": action,
+            "category": category,
+            "fundamentalist_score_0_10": fundamentalist_score_0_10,
             "confidence": confidence,
             "agreement": agreement,
             "justification": justification,
@@ -93,9 +110,9 @@ class RecommendationService:
         }
         document["_id"] = self._recommendation_repository.insert(document)
         logger.info(
-            "Recomendação gerada para %s: action=%s confidence=%s",
+            "Recomendação gerada para %s: category=%s confidence=%s",
             ticker,
-            action,
+            category,
             confidence,
             extra={"ticker": ticker},
         )

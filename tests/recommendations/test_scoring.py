@@ -1,10 +1,11 @@
 import pytest
 
 from recommendations.scoring import (
-    action_from_label,
     classify_agreement,
     classify_confidence,
     classify_direction,
+    classify_recommendation,
+    to_zero_ten_scale,
 )
 
 
@@ -17,11 +18,38 @@ def test_classify_direction(sub_score, expected):
 
 
 @pytest.mark.parametrize(
-    "label,expected",
-    [("favoravel", "comprar"), ("neutro", "manter"), ("desfavoravel", "evitar")],
+    "score,expected",
+    [(100.0, 10.0), (0.0, 5.0), (-100.0, 0.0), (80.0, 9.0), (60.0, 8.0)],
 )
-def test_action_from_label(label, expected):
-    assert action_from_label(label) == expected
+def test_to_zero_ten_scale(score, expected):
+    assert to_zero_ten_scale(score) == expected
+
+
+@pytest.mark.parametrize(
+    "sub_score,expected_category",
+    [
+        (100.0, "compra_forte"),  # 10.0
+        (81.0, "compra_forte"),  # 9.05
+        (80.0, "compra_forte"),  # 9.0 (limite)
+        (79.0, "comprar"),  # 8.95
+        (60.0, "comprar"),  # 8.0 (limite)
+        (59.0, "aguardar"),  # 7.95
+        (30.0, "aguardar"),  # 6.5 (limite)
+        (29.0, "manter"),  # 6.45
+        (0.0, "manter"),  # 5.0 (limite)
+        (-1.0, "revisao_necessaria"),  # 4.95
+        (-100.0, "revisao_necessaria"),  # 0.0
+    ],
+)
+def test_classify_recommendation_bands(sub_score, expected_category):
+    category, score_0_10 = classify_recommendation(sub_score)
+
+    assert category == expected_category
+    assert score_0_10 == to_zero_ten_scale(sub_score)
+
+
+def test_classify_recommendation_missing_sub_score_is_revisao_necessaria():
+    assert classify_recommendation(None) == ("revisao_necessaria", None)
 
 
 def test_classify_agreement_all_positive_is_concordante():

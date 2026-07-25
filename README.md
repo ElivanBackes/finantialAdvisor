@@ -34,11 +34,19 @@ Buscar/Cadastrar → Coletar e Analisar → Gerar Conclusão → Gerar Recomenda
 3. **Conclusão** (`conclusions/`): cada análise vira um sub-score
    normalizado (-100 a +100); a média das disponíveis (redistribuindo peso
    se alguma faltar) gera um `overall_score` + rótulo `favoravel` /
-   `neutro` / `desfavoravel`.
-4. **Recomendação** (`recommendations/`): traduz o rótulo da conclusão em
-   ação (`comprar` / `manter` / `evitar`), soma um sinal de **confiança**
-   (`alta`/`media`/`baixa`) baseado em quantas análises estavam disponíveis
-   e se concordam entre si, e monta uma justificativa textual.
+   `neutro` / `desfavoravel`. O sub-score fundamentalista é uma **composição
+   ponderada** (não média simples): valuation 30%, P/VP 20%, Dividend Yield
+   15%, P/L 15%, ROE 10%, endividamento 10% — pesos redistribuídos entre os
+   critérios disponíveis quando algum falta. **Valuation** compara o preço
+   atual a um preço-teto conservador (o menor entre a fórmula de Graham,
+   `sqrt(22.5 x LPA x VPA)`, e a de Bazin, `DPA / 6%`).
+4. **Recomendação** (`recommendations/`): classifica o ativo em uma de 5
+   categorias — `Compra Forte` / `Comprar` / `Aguardar` / `Manter` /
+   `Revisão Necessária` — a partir do sub-score fundamentalista (que já
+   embute o valuation), convertido para uma nota 0-10. Técnica e
+   notícias/sentimento não decidem a categoria, mas alimentam um sinal
+   auxiliar de **concordância** e **confiança** (`alta`/`media`/`baixa`)
+   junto com a justificativa textual.
 
 Cada etapa persiste seu resultado no MongoDB de forma *append-only*
 (histórico completo, nunca sobrescreve), então o dashboard sempre mostra o
@@ -172,3 +180,14 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
 - Expansão natural: novos `AssetType` (cripto, ações internacionais, renda
   fixa/passivos) exigem apenas novos `collectors/` + adaptar os
   `analyzers/` existentes ou criar novos — o `core/` não precisa mudar.
+- O preço-teto (Graham/Bazin) usa o DY/LPA de um único ponto no tempo (não
+  há histórico de dividendos/lucros coletado ainda) e o yield mínimo do
+  Bazin é fixo em 6% (não calibrado por setor) — aproximações aceitáveis
+  para o MVP2, não substituem análise fundamentalista completa.
+- Documentos de `recommendations` gerados antes desta mudança usam o schema
+  antigo (`action`: comprar/manter/evitar) — o dashboard detecta e pede para
+  gerar uma nova recomendação em vez de quebrar, mas não há migração
+  automática dos documentos antigos.
+- Próximos passos mapeados (Fases 2-4 do modelo de valuation): payout ratio,
+  FCF, EV/EBITDA, crescimento (CAGR), estratégia de alocação de carteira,
+  cenário macroeconômico setorial e histórico de múltiplos.

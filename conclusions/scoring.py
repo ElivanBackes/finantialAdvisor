@@ -3,6 +3,8 @@ um sub-score -100..100 + highlights textuais. Sem I/O, sem Mongo — toda a
 orquestração/persistência fica em conclusions/conclusion_service.py.
 """
 
+import math
+
 
 def _normalize_percent(value: float) -> float:
     """Heurística empírica (yfinance é inconsistente entre campos):
@@ -96,20 +98,109 @@ def _score_debt_to_equity(d2e: float | None) -> tuple[float | None, str | None]:
     return -100.0, f"Endividamento muito alto ({d2e:.2f}%)."
 
 
-def score_fundamentalist(data: dict) -> tuple[float | None, list[str]]:
-    pairs = [
-        _score_pl(data.get("pl")),
-        _score_pvp(data.get("pvp")),
-        _score_dividend_yield(data.get("dividend_yield")),
-        _score_roe(data.get("roe")),
-        _score_debt_to_equity(data.get("debt_to_equity")),
+def _fair_value_graham(eps: float | None, vpa: float | None) -> float | None:
+    """Fórmula de Graham: valor justo = sqrt(22.5 x LPA x VPA). Só válida com
+    lucro e patrimônio líquido positivos (empresa deficitária não tem
+    "valor justo" bem definido por essa fórmula).
+    """
+    if eps is None or vpa is None or eps <= 0 or vpa <= 0:
+        return None
+    return math.sqrt(22.5 * eps * vpa)
+
+
+def _ceiling_price_bazin(dpa: float | None) -> float | None:
+    """Método de Bazin: preço-teto = DPA / 6%. Assume 6% como yield mínimo
+    aceitável — heurística clássica, não calibrada por setor.
+    """
+    if dpa is None or dpa <= 0:
+        return None
+    return dpa / 0.06
+
+
+def _score_valuation(data: dict) -> tuple[float | None, str | None]:
+    """Preço-teto conservador = menor valor entre Graham e Bazin (quando
+    ambos disponíveis). Pontua pela margem de segurança entre o preço atual
+    e esse preço-teto — critério de maior peso no score fundamentalista,
+    por ser o fator dominante segundo a especificação de valuation.
+    """
+    price = data.get("price")
+    if price is None or price <= 0:
+        return None, None
+
+    pvp = data.get("pvp")
+    vpa = price / pvp if pvp and pvp > 0 else None
+    dividend_yield = data.get("dividend_yield")
+    dpa = price * (_normalize_percent(dividend_yield) / 100) if dividend_yield is not None else None
+
+    candidates = [
+        v
+        for v in (_fair_value_graham(data.get("eps"), vpa), _ceiling_price_bazin(dpa))
+        if v is not None
     ]
-    available = [(score, text) for score, text in pairs if score is not None]
+    if not candidates:
+        return None, None
+
+    preco_teto = min(candidates)
+    margem = (preco_teto - price) / price * 100
+
+    if margem >= 30:
+        return 100.0, (
+            f"Preço R$ {price:.2f} com {margem:.1f}% de margem de segurança "
+            f"em relação ao preço-teto estimado (R$ {preco_teto:.2f})."
+        )
+    if margem >= 15:
+        return 60.0, (
+            f"Preço R$ {price:.2f} com margem de segurança adequada "
+            f"({margem:.1f}%) frente ao preço-teto (R$ {preco_teto:.2f})."
+        )
+    if margem >= 0:
+        return 20.0, (
+            f"Preço R$ {price:.2f} próximo do preço-teto (R$ {preco_teto:.2f}) "
+            "— margem de segurança reduzida."
+        )
+    if margem >= -15:
+        return -50.0, (
+            f"Preço R$ {price:.2f} está {abs(margem):.1f}% acima do preço-teto "
+            f"(R$ {preco_teto:.2f}) — reduz a atratividade para novos aportes."
+        )
+    return -100.0, (
+        f"Preço R$ {price:.2f} está {abs(margem):.1f}% acima do preço-teto "
+        f"(R$ {preco_teto:.2f}) — margem de segurança negativa."
+    )
+
+
+# Pesos do score fundamentalista (Fase 1 da especificação de valuation).
+# Valuation assume o peso de maior importância (30%, dominante segundo a
+# spec); PL e PVP seguem como proxy de "histórico de múltiplos" até que
+# ROIC/FCF/payout/EV-EBITDA/crescimento sejam incorporados (Fase 2).
+_FUNDAMENTALIST_WEIGHTS = {
+    "valuation": 30,
+    "dividend_yield": 15,
+    "pl": 15,
+    "pvp": 20,
+    "roe": 10,
+    "debt_to_equity": 10,
+}
+
+
+def score_fundamentalist(data: dict) -> tuple[float | None, list[str]]:
+    scored = {
+        "valuation": _score_valuation(data),
+        "pl": _score_pl(data.get("pl")),
+        "pvp": _score_pvp(data.get("pvp")),
+        "dividend_yield": _score_dividend_yield(data.get("dividend_yield")),
+        "roe": _score_roe(data.get("roe")),
+        "debt_to_equity": _score_debt_to_equity(data.get("debt_to_equity")),
+    }
+    available = {key: pair for key, pair in scored.items() if pair[0] is not None}
     if not available:
         return None, []
 
-    sub_score = round(sum(score for score, _ in available) / len(available), 2)
-    top_highlights = sorted(available, key=lambda pair: -abs(pair[0]))[:3]
+    total_weight = sum(_FUNDAMENTALIST_WEIGHTS[key] for key in available)
+    weighted_sum = sum(_FUNDAMENTALIST_WEIGHTS[key] * pair[0] for key, pair in available.items())
+    sub_score = round(weighted_sum / total_weight, 2)
+
+    top_highlights = sorted(available.values(), key=lambda pair: -abs(pair[0]))[:3]
     return sub_score, [text for _, text in top_highlights]
 
 
