@@ -5,6 +5,8 @@ from conclusions.scoring import (
     _score_ev_ebitda,
     _score_fcf_yield,
     _score_growth,
+    _score_historical_multiples,
+    _score_roic,
     _score_valuation,
     overall_label,
     score_fundamentalist,
@@ -27,7 +29,7 @@ def test_score_fundamentalist_petr4_like_without_price_is_favorable():
     }
     score, highlights = score_fundamentalist(data)
 
-    assert score == 82.22
+    assert score == 84.47
     assert len(highlights) == 3
 
 
@@ -46,7 +48,7 @@ def test_score_fundamentalist_petr4_like_with_valuation_included():
     }
     score, highlights = score_fundamentalist(data)
 
-    assert score == 89.33
+    assert score == 91.32
     assert any("preço-teto" in h for h in highlights)
 
 
@@ -184,6 +186,56 @@ def test_score_dividend_yield_no_payout_penalty_when_no_dividend():
 
     assert score == 0.0
     assert "Payout" not in highlight
+
+
+@pytest.mark.parametrize(
+    "ebit,expected_score",
+    [(-50, -100.0), (50, -20.0), (100, 20.0), (150, 60.0), (250, 90.0), (350, 100.0)],
+)
+def test_score_roic_bands(ebit, expected_score):
+    data = {"ebit": ebit, "tax_rate": 0, "invested_capital": 1000}
+    score, highlight = _score_roic(data)
+
+    assert score == expected_score
+    assert "ROIC" in highlight
+
+
+def test_score_roic_absent_without_any_field():
+    assert _score_roic({"ebit": None, "tax_rate": 0, "invested_capital": 1000}) == (None, None)
+    assert _score_roic({"ebit": 100, "tax_rate": None, "invested_capital": 1000}) == (None, None)
+    assert _score_roic({"ebit": 100, "tax_rate": 0, "invested_capital": None}) == (None, None)
+
+
+def test_score_roic_absent_when_invested_capital_not_positive():
+    assert _score_roic({"ebit": 100, "tax_rate": 0, "invested_capital": 0}) == (None, None)
+
+
+def test_score_historical_multiples_cheap_relative_to_own_history():
+    data = {
+        "pl": 8,
+        "pl_historical_avg": 10,
+        "pvp": 1.5,
+        "pvp_historical_avg": 2,
+        "ev_ebitda": None,
+        "ev_ebitda_historical_avg": None,
+    }
+    score, highlight = _score_historical_multiples(data)
+
+    assert score == 100.0
+    assert "abaixo da própria média histórica" in highlight
+
+
+def test_score_historical_multiples_expensive_relative_to_own_history():
+    score, highlight = _score_historical_multiples({"pl": 12, "pl_historical_avg": 10})
+
+    assert score == -50.0
+    assert "acima da própria média histórica" in highlight
+
+
+def test_score_historical_multiples_absent_without_any_pair():
+    assert _score_historical_multiples({"pl": None, "pvp": None, "ev_ebitda": None}) == (None, None)
+    # Só o valor atual, sem média histórica -> par não é utilizável.
+    assert _score_historical_multiples({"pl": 12, "pl_historical_avg": None}) == (None, None)
 
 
 def test_score_technical_strong_positive():

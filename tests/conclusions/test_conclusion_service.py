@@ -7,11 +7,17 @@ from core.exceptions import ConclusionError
 
 
 class _FakeAssetService:
-    def __init__(self, analyses: dict[AnalysisType, dict | None]) -> None:
+    def __init__(
+        self, analyses: dict[AnalysisType, dict | None], history: list[dict] | None = None
+    ) -> None:
         self._analyses = analyses
+        self._history = history or []
 
     def get_latest_analyses(self, asset_id):
         return self._analyses
+
+    def get_analysis_history(self, asset_id, analysis_type):
+        return self._history
 
 
 class _FakeConclusionRepository:
@@ -78,7 +84,7 @@ def test_build_conclusion_all_three_present():
     result = service.build_conclusion(ObjectId(), "PETR4.SA")
 
     assert result["missing_analyses"] == []
-    assert result["overall_score"] == 50.3
+    assert result["overall_score"] == 51.05
     assert result["label"] == "favoravel"
     assert result["based_on"]["fundamentalist_analysis_id"] == _FUNDAMENTALIST_DOC["_id"]
     assert result["based_on"]["technical_analysis_id"] == _TECHNICAL_DOC["_id"]
@@ -101,7 +107,49 @@ def test_build_conclusion_missing_one_redistributes_weight():
 
     assert result["missing_analyses"] == ["technical"]
     assert result["based_on"]["technical_analysis_id"] is None
-    assert result["overall_score"] == round((82.22 + 42.0) / 2, 2)
+    assert result["overall_score"] == round((84.47 + 42.0) / 2, 2)
+
+
+def test_build_conclusion_injects_historical_multiple_averages():
+    """Com >=3 análises fundamentalistas passadas (excluindo a atual), o
+    sub-score fundamentalista deve refletir o critério de histórico de
+    múltiplos — comprovado indiretamente comparando com/sem histórico.
+    """
+    current_doc = {"_id": ObjectId(), "data": {"pl": 12.0}}
+    history_without_current = [
+        {"_id": ObjectId(), "data": {"pl": 15.0}},
+        {"_id": ObjectId(), "data": {"pl": 15.0}},
+        {"_id": ObjectId(), "data": {"pl": 15.0}},
+    ]
+    analyses = {
+        AnalysisType.FUNDAMENTALIST: current_doc,
+        AnalysisType.TECHNICAL: None,
+        AnalysisType.NEWS_SENTIMENT: None,
+    }
+
+    service_with_history = ConclusionService(
+        asset_service=_FakeAssetService(
+            analyses, history=[current_doc, *history_without_current]
+        ),
+        conclusion_repository=_FakeConclusionRepository(),
+    )
+    service_without_history = ConclusionService(
+        asset_service=_FakeAssetService(analyses, history=[current_doc]),
+        conclusion_repository=_FakeConclusionRepository(),
+    )
+
+    with_history = service_with_history.build_conclusion(ObjectId(), "AAA4.SA")
+    without_history = service_without_history.build_conclusion(ObjectId(), "AAA4.SA")
+
+    # P/L atual (12) abaixo da própria média histórica (15) -> critério de
+    # histórico de múltiplos entra positivo, elevando o sub-score.
+    assert with_history["breakdown"]["fundamentalist"]["sub_score"] > (
+        without_history["breakdown"]["fundamentalist"]["sub_score"]
+    )
+    assert any(
+        "própria média histórica" in h
+        for h in with_history["breakdown"]["fundamentalist"]["highlights"]
+    )
 
 
 def test_build_conclusion_all_missing_raises():

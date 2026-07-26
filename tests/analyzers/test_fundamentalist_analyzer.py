@@ -91,6 +91,30 @@ def test_analyze_maps_fase2_fields_from_yfinance():
     assert result.data["revenue_growth"] == 0.004
 
 
+def test_analyze_maps_roic_and_sector_fields_from_yfinance():
+    asset = Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
+    yf_raw = RawData(
+        source="yfinance",
+        payload={
+            "info": {
+                "ebit": 169257967200.0,
+                "taxRateForCalcs": 0.264042,
+                "investedCapital": 558911275200.0,
+                "sector": "Energy",
+                "industry": "Oil & Gas Integrated",
+            }
+        },
+    )
+
+    result = FundamentalistAnalyzer().analyze(asset, [yf_raw])
+
+    assert result.data["ebit"] == 169257967200.0
+    assert result.data["tax_rate"] == pytest.approx(0.264042)
+    assert result.data["invested_capital"] == 558911275200.0
+    assert result.data["sector"] == "Energy"
+    assert result.data["industry"] == "Oil & Gas Integrated"
+
+
 def test_analyze_raises_when_no_data():
     asset = Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
 

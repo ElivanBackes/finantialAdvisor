@@ -30,7 +30,9 @@ Buscar/Cadastrar → Coletar e Analisar → Gerar Conclusão → Gerar Recomenda
    schema e fontes, mas podendo compartilhar dados brutos entre si:
    - **Fundamentalista**: P/L, P/VP, Dividend Yield (com payout como
      modificador de sustentabilidade), ROE, endividamento, EV/EBITDA, FCF
-     yield e crescimento (lucro/receita).
+     yield, crescimento (lucro/receita), ROIC (via demonstrativos
+     financeiros) e histórico dos múltiplos (compara P/L, P/VP e EV/EBITDA
+     atuais com a própria média histórica do ativo).
    - **Técnica**: médias móveis (SMA 20/50/200), RSI(14), MACD, tendência.
    - **Notícias/Sentimento**: score de sentimento (léxico PT-BR) sobre
      notícias recentes do ativo.
@@ -38,29 +40,41 @@ Buscar/Cadastrar → Coletar e Analisar → Gerar Conclusão → Gerar Recomenda
    normalizado (-100 a +100); a média das disponíveis (redistribuindo peso
    se alguma faltar) gera um `overall_score` + rótulo `favoravel` /
    `neutro` / `desfavoravel`. O sub-score fundamentalista é uma **composição
-   ponderada** (não média simples): valuation 30%, Dividend Yield 15%, ROE
-   10%, crescimento 10%, FCF yield 10%, endividamento 10%, EV/EBITDA 5%,
-   P/L 5%, P/VP 5% — pesos redistribuídos entre os critérios disponíveis
-   quando algum falta. **Valuation** compara o preço atual a um preço-teto
-   conservador (o menor entre a fórmula de Graham, `sqrt(22.5 x LPA x
-   VPA)`, e a de Bazin, `DPA / 6%`). **Payout** não tem peso próprio —
-   funciona como modificador: payout acima de 60% reduz a nota do dividend
-   yield proporcionalmente (a spec explicitamente proíbe recomendar compra
-   só pelo DY).
+   ponderada** (não média simples), seguindo os pesos da especificação:
+   valuation 30%, Dividend Yield 15%, ROE 10%, crescimento 10%, FCF yield
+   10%, endividamento 10%, ROIC 5%, histórico dos múltiplos 5%, EV/EBITDA
+   2%, P/L 1,5%, P/VP 1,5% — pesos redistribuídos entre os critérios
+   disponíveis quando algum falta (ex: ROIC ausente, histórico insuficiente).
+   **Valuation** compara o preço atual a um preço-teto conservador (o menor
+   entre a fórmula de Graham, `sqrt(22.5 x LPA x VPA)`, e a de Bazin,
+   `DPA / 6%`). **Payout** não tem peso próprio — funciona como modificador:
+   payout acima de 60% reduz a nota do dividend yield proporcionalmente (a
+   spec explicitamente proíbe recomendar compra só pelo DY). **ROIC** vem de
+   EBIT/alíquota efetiva/capital investido (`.financials`/`.balance_sheet`
+   do yfinance). **Histórico dos múltiplos** compara P/L, P/VP e EV/EBITDA
+   atuais com a média das análises fundamentalistas passadas do próprio
+   ativo (mín. 3 pontos) — fica ausente para ativos recém-cadastrados.
 4. **Recomendação** (`recommendations/`): classifica o ativo em uma de 5
    categorias — `Compra Forte` / `Comprar` / `Aguardar` / `Manter` /
    `Revisão Necessária` — a partir do sub-score fundamentalista (que já
    embute o valuation), convertido para uma nota 0-10. Técnica e
    notícias/sentimento não decidem a categoria, mas alimentam um sinal
    auxiliar de **concordância** e **confiança** (`alta`/`media`/`baixa`)
-   junto com a justificativa textual. Por fim, a **estratégia de alocação
-   de carteira** (`portfolio/`) é aplicada como último ajuste: se o usuário
-   registrou uma posição para o ativo (`Carteira`) e ele já está **acima**
-   da alocação-alvo, uma categoria `Compra Forte`/`Comprar` é rebaixada para
-   `Aguardar` — evita concentrar novos aportes em ativos já sobreponderados.
-   A alocação nunca *promove* uma categoria (fundamentos sempre têm
-   prioridade); registrar posição é opcional — sem ela, a recomendação
-   funciona exatamente como antes.
+   junto com a justificativa textual. Dois ajustes são aplicados em
+   sequência sobre o sub-score/categoria fundamentalista:
+   1. **Cenário macro setorial** (`macro/`): a partir do setor/indústria do
+      ativo (yfinance), soma um pequeno ajuste (±10 pontos, nunca um
+      critério pesado) ao sub-score — Petróleo/Gás usa a tendência do preço
+      do Brent e do câmbio (BCB); Bancos/Seguros usa o nível da Selic
+      (BCB). Demais setores não recebem ajuste (cobertura parcial por
+      design — ver Limitações). Isso pode inclusive mudar a categoria (ex:
+      de `Aguardar` para `Comprar`) antes da alocação ser considerada.
+   2. **Estratégia de alocação de carteira** (`portfolio/`): se o usuário
+      registrou uma posição para o ativo (`Carteira`) e ele já está
+      **acima** da alocação-alvo, uma categoria `Compra Forte`/`Comprar` é
+      rebaixada para `Aguardar` — evita concentrar novos aportes em ativos
+      já sobreponderados. Nunca *promove* uma categoria (fundamentos e
+      macro sempre têm prioridade); registrar posição é opcional.
 
 Cada etapa de análise persiste seu resultado no MongoDB de forma
 *append-only* (histórico completo, nunca sobrescreve), então o dashboard
@@ -168,6 +182,7 @@ analyzers/       as 3 análises (fundamentalista, técnica, sentimento)
 conclusions/     síntese das 3 análises em um score + rótulo
 recommendations/ veredito final (categoria + confiança + justificativa)
 portfolio/       posições da carteira do usuário e cálculo de alocação
+macro/           ajuste de cenário macroeconômico setorial (BCB, Brent)
 persistence/     repositórios MongoDB e definição de índices
 services/        orquestração (AssetService: coleta -> análises)
 config/          configuração (.env, conexão Mongo, logging_setup.py)
@@ -216,9 +231,25 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
 - EV/EBITDA e FCF costumam vir ausentes para bancos/seguradoras no yfinance
   (ex: ITUB4.SA) — o scoring já trata como ausente e redistribui o peso, sem
   quebrar a análise.
-- ROIC, histórico real de múltiplos e qualidade da gestão (5% cada na
-  especificação) ainda não têm fonte de dado — peso redistribuído entre
-  EV/EBITDA, P/L e P/VP até serem implementados.
+- **ROIC** usa o EBIT/alíquota efetiva/"Invested Capital" mais recentes de
+  `.financials`/`.balance_sheet` (yfinance) — chamadas extras e mais frágeis
+  que os campos de `.info`; isoladas (uma falha aqui não derruba a coleta),
+  mas o dado pode vir ausente para tickers com cobertura pior.
+- **Histórico dos múltiplos** só fica disponível a partir da 4ª análise
+  fundamentalista do mesmo ativo (mín. 3 pontos passados) — em ativos
+  recém-cadastrados, o peso é redistribuído entre os demais critérios.
+- **Qualidade da gestão** (5% na especificação) não tem fonte de dado
+  gratuita confiável e não foi implementada — peso redistribuído
+  automaticamente entre os critérios disponíveis.
+- **Cenário macro setorial** cobre só Petróleo/Gás (Brent + câmbio) e
+  Bancos/Seguros (Selic) — os únicos com fonte gratuita confiável
+  encontrada. Energia Elétrica, Holding Financeira e demais setores da
+  especificação não recebem ajuste (ficam neutros) em vez de uma heurística
+  sem lastro real.
+- A série de câmbio do BCB/SGS (série 1) limita o endpoint `/dados/ultimos`
+  a ~20 pontos (erro 400 acima disso, validado empiricamente) — por isso a
+  janela de tendência do câmbio é de 20 dias úteis (~1 mês), mais curta que
+  a do petróleo (3 meses via yfinance).
 - A alocação-alvo é um número fixo por ativo (sem tolerância/banda de
   rebalanceamento) — qualquer alocação acima da meta, por menor que seja,
   já rebaixa uma categoria atrativa para "Aguardar".
@@ -227,6 +258,8 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
   o preço médio de compra se o ativo ainda não foi coletado/analisado.
 - Registrar posição é opt-in e por ativo, um de cada vez, na página
   "Carteira" — não há import em lote (ex: CSV da corretora).
-- Próximos passos mapeados (Fase 4 do modelo de valuation): cenário
-  macroeconômico setorial e histórico real de múltiplos (CAGR multi-ano,
-  ROIC, qualidade da gestão).
+- As 4 fases do modelo de valuation mapeadas na análise comparativa com a
+  especificação técnica estão implementadas. Gaps conhecidos e
+  intencionalmente fora de escopo: CAGR real multi-ano (só há dado de um
+  período), qualidade da gestão (sem fonte gratuita) e cobertura macro
+  completa por setor (só Petróleo/Gás e Bancos/Seguros).

@@ -5,6 +5,8 @@ from bson import ObjectId
 
 from conclusions.conclusion_service import ConclusionService
 from core.exceptions import RecommendationError
+from macro.macro_service import MacroService
+from persistence.repositories.fundamentalist_repository import FundamentalistRepository
 from persistence.repositories.recommendation_repository import RecommendationRepository
 from portfolio.portfolio_service import PortfolioService
 from recommendations.scoring import (
@@ -60,10 +62,14 @@ class RecommendationService:
         conclusion_service: ConclusionService | None = None,
         recommendation_repository: RecommendationRepository | None = None,
         portfolio_service: PortfolioService | None = None,
+        macro_service: MacroService | None = None,
+        fundamentalist_repository: FundamentalistRepository | None = None,
     ) -> None:
         self._conclusion_service = conclusion_service or ConclusionService()
         self._recommendation_repository = recommendation_repository or RecommendationRepository()
         self._portfolio_service = portfolio_service or PortfolioService()
+        self._macro_service = macro_service or MacroService()
+        self._fundamentalist_repository = fundamentalist_repository or FundamentalistRepository()
 
     def get_latest_recommendation(self, asset_id: ObjectId) -> dict | None:
         return self._recommendation_repository.find_latest_by_asset(asset_id)
@@ -92,7 +98,17 @@ class RecommendationService:
         agreement = classify_agreement(breakdown)
         confidence = classify_confidence(available_count, agreement)
         fundamentalist_sub_score = breakdown.get("fundamentalist", {}).get("sub_score")
-        category, fundamentalist_score_0_10 = classify_recommendation(fundamentalist_sub_score)
+
+        fundamentalist_doc = self._fundamentalist_repository.find_latest_by_asset(asset_id)
+        fundamentalist_data = (fundamentalist_doc or {}).get("data") or {}
+        macro = self._macro_service.compute_adjustment(
+            fundamentalist_data.get("sector"), fundamentalist_data.get("industry")
+        )
+        adjusted_sub_score = fundamentalist_sub_score
+        if macro is not None and fundamentalist_sub_score is not None:
+            adjusted_sub_score = max(-100.0, min(100.0, fundamentalist_sub_score + macro["adjustment"]))
+
+        category, fundamentalist_score_0_10 = classify_recommendation(adjusted_sub_score)
 
         allocation = self._portfolio_service.compute_allocation(asset_id)
         allocation_status = allocation["status"] if allocation else None
@@ -107,6 +123,11 @@ class RecommendationService:
                 f"meta de {allocation['target_allocation_pct']:.1f}% — priorizando outros ativos "
                 "para evitar concentração."
             )
+        if macro is not None:
+            justification.append(
+                f"Cenário macro do setor ajustou o score em {macro['adjustment']:+.1f} pontos:"
+            )
+            justification.extend(macro["factors"])
         justification.extend(breakdown.get("fundamentalist", {}).get("highlights", []))
         justification.append(_AGREEMENT_TEXT[agreement])
         justification.append(_CONFIDENCE_TEXT[confidence])
@@ -122,6 +143,7 @@ class RecommendationService:
             "confidence": confidence,
             "agreement": agreement,
             "allocation": allocation,
+            "macro": macro,
             "justification": justification,
             "disclaimer": DISCLAIMER,
             "overall_score": conclusion["overall_score"],

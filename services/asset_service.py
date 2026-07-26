@@ -68,6 +68,14 @@ class AssetService:
             for analysis_type, repository_cls in _ANALYSIS_REPOSITORIES.items()
         }
 
+    def get_analysis_history(self, asset_id: ObjectId, analysis_type: AnalysisType) -> list[dict]:
+        """Todo o histórico de uma análise, mais recente primeiro — usado
+        para comparar indicadores atuais com a própria média histórica do
+        ativo (ex: "histórico dos múltiplos" na análise fundamentalista).
+        """
+        repository_cls = self._analysis_repositories[analysis_type]
+        return repository_cls().find_all_by_asset(asset_id)
+
     def collect_and_analyze(
         self, ticker: str, asset_type: AssetType, name: str = ""
     ) -> dict[AnalysisType, AnalysisResult | None]:
