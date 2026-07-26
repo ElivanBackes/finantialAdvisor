@@ -3,9 +3,11 @@ from datetime import datetime, timezone
 
 from bson import ObjectId
 
+from analysis_history.analysis_history_service import AnalysisHistoryService
 from conclusions.conclusion_service import ConclusionService
 from core.exceptions import RecommendationError
 from macro.macro_service import MacroService
+from persistence.repositories.asset_repository import AssetRepository
 from persistence.repositories.fundamentalist_repository import FundamentalistRepository
 from persistence.repositories.recommendation_repository import RecommendationRepository
 from portfolio.portfolio_service import PortfolioService
@@ -64,12 +66,16 @@ class RecommendationService:
         portfolio_service: PortfolioService | None = None,
         macro_service: MacroService | None = None,
         fundamentalist_repository: FundamentalistRepository | None = None,
+        analysis_history_service: AnalysisHistoryService | None = None,
+        asset_repository: AssetRepository | None = None,
     ) -> None:
         self._conclusion_service = conclusion_service or ConclusionService()
         self._recommendation_repository = recommendation_repository or RecommendationRepository()
         self._portfolio_service = portfolio_service or PortfolioService()
         self._macro_service = macro_service or MacroService()
         self._fundamentalist_repository = fundamentalist_repository or FundamentalistRepository()
+        self._analysis_history_service = analysis_history_service or AnalysisHistoryService()
+        self._asset_repository = asset_repository or AssetRepository()
 
     def get_latest_recommendation(self, asset_id: ObjectId) -> dict | None:
         return self._recommendation_repository.find_latest_by_asset(asset_id)
@@ -152,6 +158,13 @@ class RecommendationService:
             "missing_analyses": missing,
         }
         document["_id"] = self._recommendation_repository.insert(document)
+
+        asset_doc = self._asset_repository.get_by_id(asset_id)
+        company_name = (asset_doc or {}).get("name") or ticker
+        self._analysis_history_service.record(
+            asset_id, ticker, company_name, document, fundamentalist_data
+        )
+
         logger.info(
             "Recomendação gerada para %s: category=%s confidence=%s",
             ticker,

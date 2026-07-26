@@ -6,7 +6,7 @@ orquestração/persistência fica em conclusions/conclusion_service.py.
 import math
 
 
-def _normalize_percent(value: float) -> float:
+def normalize_percent(value: float) -> float:
     """Heurística empírica (yfinance é inconsistente entre campos):
     se |value| <= 1, trata como fração e multiplica por 100 (ex: 0.256 -> 25.6);
     se |value| > 1, assume que já está em formato percentual (ex: 9.07 -> 9.07).
@@ -75,7 +75,7 @@ def _score_dividend_yield(
 ) -> tuple[float | None, str | None]:
     if dy is None:
         return None, None
-    dy_pct = _normalize_percent(dy)
+    dy_pct = normalize_percent(dy)
     if dy_pct <= 0:
         return 0.0, "Sem distribuição de dividendos (não é necessariamente ruim)."
     if dy_pct < 3:
@@ -96,7 +96,7 @@ def _score_dividend_yield(
 def _score_roe(roe: float | None) -> tuple[float | None, str | None]:
     if roe is None:
         return None, None
-    roe_pct = _normalize_percent(roe)
+    roe_pct = normalize_percent(roe)
     if roe_pct < 0:
         return -100.0, f"ROE negativo ({roe_pct:.2f}%), patrimônio sendo corroído."
     if roe_pct < 5:
@@ -145,20 +145,20 @@ def _ceiling_price_bazin(dpa: float | None) -> float | None:
     return dpa / 0.06
 
 
-def _score_valuation(data: dict) -> tuple[float | None, str | None]:
+def compute_ceiling_price(data: dict) -> float | None:
     """Preço-teto conservador = menor valor entre Graham e Bazin (quando
-    ambos disponíveis). Pontua pela margem de segurança entre o preço atual
-    e esse preço-teto — critério de maior peso no score fundamentalista,
-    por ser o fator dominante segundo a especificação de valuation.
+    ambos disponíveis). Extraído de `_score_valuation` para reuso fora do
+    scoring (ex: exibição numérica na tela de Histórico de Análises) — o
+    highlight textual só embutia esse valor em uma frase, não como número.
     """
     price = data.get("price")
     if price is None or price <= 0:
-        return None, None
+        return None
 
     pvp = data.get("pvp")
     vpa = price / pvp if pvp and pvp > 0 else None
     dividend_yield = data.get("dividend_yield")
-    dpa = price * (_normalize_percent(dividend_yield) / 100) if dividend_yield is not None else None
+    dpa = price * (normalize_percent(dividend_yield) / 100) if dividend_yield is not None else None
 
     candidates = [
         v
@@ -166,9 +166,24 @@ def _score_valuation(data: dict) -> tuple[float | None, str | None]:
         if v is not None
     ]
     if not candidates:
+        return None
+    return min(candidates)
+
+
+def _score_valuation(data: dict) -> tuple[float | None, str | None]:
+    """Pontua pela margem de segurança entre o preço atual e o preço-teto
+    conservador (`compute_ceiling_price`) — critério de maior peso no score
+    fundamentalista, por ser o fator dominante segundo a especificação de
+    valuation.
+    """
+    price = data.get("price")
+    if price is None or price <= 0:
         return None, None
 
-    preco_teto = min(candidates)
+    preco_teto = compute_ceiling_price(data)
+    if preco_teto is None:
+        return None, None
+
     margem = (preco_teto - price) / price * 100
 
     if margem >= 30:

@@ -22,6 +22,9 @@ class AssetRepository:
     def get_by_ticker(self, ticker: str) -> dict[str, Any] | None:
         return self._collection.find_one({"ticker": ticker})
 
+    def get_by_id(self, asset_id: ObjectId) -> dict[str, Any] | None:
+        return self._collection.find_one({"_id": asset_id})
+
     def upsert(self, asset: Asset) -> ObjectId:
         now = datetime.now(timezone.utc)
         result = self._collection.find_one_and_update(
