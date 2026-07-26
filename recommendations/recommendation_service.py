@@ -6,7 +6,13 @@ from bson import ObjectId
 from conclusions.conclusion_service import ConclusionService
 from core.exceptions import RecommendationError
 from persistence.repositories.recommendation_repository import RecommendationRepository
-from recommendations.scoring import classify_agreement, classify_confidence, classify_recommendation
+from portfolio.portfolio_service import PortfolioService
+from recommendations.scoring import (
+    apply_allocation_adjustment,
+    classify_agreement,
+    classify_confidence,
+    classify_recommendation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +59,11 @@ class RecommendationService:
         self,
         conclusion_service: ConclusionService | None = None,
         recommendation_repository: RecommendationRepository | None = None,
+        portfolio_service: PortfolioService | None = None,
     ) -> None:
         self._conclusion_service = conclusion_service or ConclusionService()
         self._recommendation_repository = recommendation_repository or RecommendationRepository()
+        self._portfolio_service = portfolio_service or PortfolioService()
 
     def get_latest_recommendation(self, asset_id: ObjectId) -> dict | None:
         return self._recommendation_repository.find_latest_by_asset(asset_id)
@@ -86,7 +94,19 @@ class RecommendationService:
         fundamentalist_sub_score = breakdown.get("fundamentalist", {}).get("sub_score")
         category, fundamentalist_score_0_10 = classify_recommendation(fundamentalist_sub_score)
 
+        allocation = self._portfolio_service.compute_allocation(asset_id)
+        allocation_status = allocation["status"] if allocation else None
+        original_category = category
+        category, adjusted_by_allocation = apply_allocation_adjustment(category, allocation_status)
+
         justification: list[str] = [_CATEGORY_TEXT[category]]
+        if adjusted_by_allocation:
+            justification.append(
+                f"Categoria ajustada de '{_CATEGORY_TEXT[original_category]}' para 'Aguardar': "
+                f"ativo em {allocation['current_allocation_pct']:.1f}% da carteira, acima da "
+                f"meta de {allocation['target_allocation_pct']:.1f}% — priorizando outros ativos "
+                "para evitar concentração."
+            )
         justification.extend(breakdown.get("fundamentalist", {}).get("highlights", []))
         justification.append(_AGREEMENT_TEXT[agreement])
         justification.append(_CONFIDENCE_TEXT[confidence])
@@ -101,6 +121,7 @@ class RecommendationService:
             "fundamentalist_score_0_10": fundamentalist_score_0_10,
             "confidence": confidence,
             "agreement": agreement,
+            "allocation": allocation,
             "justification": justification,
             "disclaimer": DISCLAIMER,
             "overall_score": conclusion["overall_score"],

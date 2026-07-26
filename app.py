@@ -22,7 +22,8 @@ pages = [
         title="Conclusão e Recomendação",
         icon="🧭",
     ),
-    st.Page("dashboard/pages/6_Logs.py", title="Logs", icon="📜"),
+    st.Page("dashboard/pages/6_Carteira.py", title="Carteira", icon="💼"),
+    st.Page("dashboard/pages/7_Logs.py", title="Logs", icon="📜"),
 ]
 
 with st.sidebar:

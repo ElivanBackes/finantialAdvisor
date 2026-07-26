@@ -26,6 +26,19 @@ class _FakeRecommendationRepository:
         return self.inserted[-1] if self.inserted else None
 
 
+class _FakePortfolioService:
+    """Por padrão simula um ativo sem posição registrada na carteira
+    (`compute_allocation` retorna None) — o caso comum, já que registrar
+    posição é opt-in. Passe `allocation` para simular um ativo com posição.
+    """
+
+    def __init__(self, allocation: dict | None = None) -> None:
+        self._allocation = allocation
+
+    def compute_allocation(self, asset_id):
+        return self._allocation
+
+
 def _conclusion(label, breakdown, missing):
     return {
         "_id": ObjectId(),
@@ -48,7 +61,9 @@ def test_build_recommendation_all_concordant_complete():
     )
     repo = _FakeRecommendationRepository()
     service = RecommendationService(
-        conclusion_service=_FakeConclusionService(conclusion), recommendation_repository=repo
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=repo,
+        portfolio_service=_FakePortfolioService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -74,6 +89,7 @@ def test_build_recommendation_mixed_signals_downgrades_confidence():
     service = RecommendationService(
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -95,6 +111,7 @@ def test_build_recommendation_missing_one_lowers_confidence():
     service = RecommendationService(
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -107,6 +124,7 @@ def test_build_recommendation_without_conclusion_raises():
     service = RecommendationService(
         conclusion_service=_FakeConclusionService(None),
         recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
     )
 
     with pytest.raises(RecommendationError):
@@ -136,6 +154,7 @@ def test_build_recommendation_category_driven_by_fundamentalist_sub_score(
     service = RecommendationService(
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -156,9 +175,128 @@ def test_build_recommendation_missing_fundamentalist_is_revisao_necessaria():
     service = RecommendationService(
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
 
     assert result["category"] == "revisao_necessaria"
     assert result["fundamentalist_score_0_10"] is None
+
+
+def test_build_recommendation_downgrades_when_overweight():
+    """Ativo atrativo (comprar) mas acima da alocação-alvo -> categoria
+    ajustada para 'aguardar', com a justificativa explicando o motivo.
+    """
+    conclusion = _conclusion(
+        "favoravel",
+        {
+            "fundamentalist": {"sub_score": 60.0, "highlights": []},
+            "technical": {"sub_score": 60.0, "highlights": []},
+            "news_sentiment": {"sub_score": 60.0, "highlights": []},
+        },
+        [],
+    )
+    allocation = {
+        "current_allocation_pct": 25.0,
+        "target_allocation_pct": 15.0,
+        "status": "acima",
+        "position_value": 2500.0,
+        "portfolio_value": 10000.0,
+    }
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(allocation),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["category"] == "aguardar"
+    assert result["allocation"] == allocation
+    assert any("acima da" in item and "25.0%" in item for item in result["justification"])
+
+
+def test_build_recommendation_no_downgrade_when_below_target():
+    """Abaixo da meta não upgrada nem rebaixa — fundamentos continuam
+    decidindo a categoria normalmente.
+    """
+    conclusion = _conclusion(
+        "favoravel",
+        {
+            "fundamentalist": {"sub_score": 60.0, "highlights": []},
+            "technical": {"sub_score": 60.0, "highlights": []},
+            "news_sentiment": {"sub_score": 60.0, "highlights": []},
+        },
+        [],
+    )
+    allocation = {
+        "current_allocation_pct": 5.0,
+        "target_allocation_pct": 15.0,
+        "status": "abaixo",
+        "position_value": 500.0,
+        "portfolio_value": 10000.0,
+    }
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(allocation),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["category"] == "comprar"
+    assert result["allocation"] == allocation
+
+
+def test_build_recommendation_no_downgrade_for_unattractive_even_if_overweight():
+    """Alocação só rebaixa categorias atrativas (comprar/compra_forte) —
+    'aguardar'/'manter' já refletem os fundamentos e não mudam.
+    """
+    conclusion = _conclusion(
+        "neutro",
+        {
+            "fundamentalist": {"sub_score": 0.0, "highlights": []},
+            "technical": {"sub_score": 0.0, "highlights": []},
+            "news_sentiment": {"sub_score": 0.0, "highlights": []},
+        },
+        [],
+    )
+    allocation = {
+        "current_allocation_pct": 30.0,
+        "target_allocation_pct": 10.0,
+        "status": "acima",
+        "position_value": 3000.0,
+        "portfolio_value": 10000.0,
+    }
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(allocation),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["category"] == "manter"
+
+
+def test_build_recommendation_allocation_none_when_no_position():
+    conclusion = _conclusion(
+        "favoravel",
+        {
+            "fundamentalist": {"sub_score": 60.0, "highlights": []},
+            "technical": {"sub_score": 60.0, "highlights": []},
+            "news_sentiment": {"sub_score": 60.0, "highlights": []},
+        },
+        [],
+    )
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(None),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["category"] == "comprar"
+    assert result["allocation"] is None
