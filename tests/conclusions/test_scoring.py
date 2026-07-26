@@ -8,6 +8,7 @@ from conclusions.scoring import (
     _score_historical_multiples,
     _score_roic,
     _score_valuation,
+    compute_ceiling_price,
     overall_label,
     score_fundamentalist,
     score_news_sentiment,
@@ -104,6 +105,20 @@ def test_score_valuation_conservative_takes_the_lower_of_graham_and_bazin():
     assert "58.20" in highlight
     assert "76.5" not in highlight
     assert score == 100.0
+
+
+def test_compute_ceiling_price_matches_the_value_used_by_score_valuation():
+    data = {"price": 38.5, "eps": 8.28, "pvp": 1.2246315, "dividend_yield": 9.07}
+
+    assert compute_ceiling_price(data) == pytest.approx(58.19916666666667)
+
+
+def test_compute_ceiling_price_absent_without_price():
+    assert compute_ceiling_price({"eps": 8.28, "dividend_yield": 9.07}) is None
+
+
+def test_compute_ceiling_price_absent_without_graham_or_bazin_inputs():
+    assert compute_ceiling_price({"price": 38.5}) is None
 
 
 @pytest.mark.parametrize(

@@ -82,6 +82,16 @@ sempre mostra o resultado mais recente de cada estágio. Posições de carteira
 (`positions`) são a exceção: como representam estado atual do usuário (não
 um evento histórico), são upsert por ativo — igual à coleção `assets`.
 
+Sempre que uma Recomendação é gerada com sucesso, `RecommendationService`
+também grava um snapshot em `analysis_history` (`analysis_history/`) —
+upsert por ativo, igual a `assets`/`positions`, não confundir com
+`recommendations`, que continua sendo o histórico completo/imutável de cada
+veredito. Essa coleção existe só para alimentar a tela **Histórico de
+Análises** (ticker, empresa, score final, DY esperado, preço atual/teto,
+potencial de valorização e recomendação) sem precisar agregar as outras
+coleções toda vez que a tela carrega. Ativos apenas cadastrados em "Buscar
+Ativo" (sem Recomendação gerada) não aparecem nela.
+
 ## Setup
 
 Pré-requisitos: Python 3.12+, Docker (para o MongoDB local).
@@ -113,7 +123,7 @@ Variáveis em `.env`:
 streamlit run app.py
 ```
 
-Abre em `http://localhost:8501` com 7 páginas na barra lateral:
+Abre em `http://localhost:8501` com 8 páginas na barra lateral:
 
 1. **Buscar Ativo**: informe um ticker B3 com sufixo `.SA` (ex: `PETR4.SA`),
    clique em "Buscar / Cadastrar" e depois em "Coletar e Analisar".
@@ -126,7 +136,13 @@ Abre em `http://localhost:8501` com 7 páginas na barra lateral:
    alocação-alvo (%) do ativo selecionado. Mostra a alocação atual calculada
    (valor da posição / valor total da carteira, usando o preço mais recente
    coletado) e uma tabela com todas as posições cadastradas.
-5. **Logs**: histórico de execução persistido no MongoDB (ver seção
+5. **Histórico de Análises**: tabela com todos os ativos já efetivamente
+   analisados (ranking por Score Final, DY esperado, preço atual/teto,
+   potencial de valorização, recomendação com badge colorida). Tem busca
+   dinâmica por ticker/empresa, filtros (recomendação, faixa de score, faixa
+   de DY), paginação e um atalho para "carregar" um ativo já analisado nas
+   demais páginas sem precisar coletar de novo.
+6. **Logs**: histórico de execução persistido no MongoDB (ver seção
    [Logs](#logs) abaixo) — filtro por nível e por ticker.
 
 ### Via linha de comando (sem Streamlit)
@@ -183,6 +199,8 @@ conclusions/     síntese das 3 análises em um score + rótulo
 recommendations/ veredito final (categoria + confiança + justificativa)
 portfolio/       posições da carteira do usuário e cálculo de alocação
 macro/           ajuste de cenário macroeconômico setorial (BCB, Brent)
+analysis_history/ snapshot consultável de todo ativo já analisado (tela
+                 "Histórico de Análises")
 persistence/     repositórios MongoDB e definição de índices
 services/        orquestração (AssetService: coleta -> análises)
 config/          configuração (.env, conexão Mongo, logging_setup.py)
@@ -263,3 +281,11 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
   intencionalmente fora de escopo: CAGR real multi-ano (só há dado de um
   período), qualidade da gestão (sem fonte gratuita) e cobertura macro
   completa por setor (só Petróleo/Gás e Bancos/Seguros).
+- O **Histórico de Análises** só passa a existir a partir desta versão —
+  recomendações geradas antes dela não têm snapshot em `analysis_history`
+  até serem regeneradas (não há migração/backfill automático).
+- A paginação e os filtros da tela de Histórico operam sobre o snapshot
+  mais recente de cada ativo (um registro por ativo) — não é uma busca no
+  histórico completo de `recommendations`; ver comparação/gráfico de
+  evolução ao longo do tempo é um próximo passo natural, não implementado
+  ainda.

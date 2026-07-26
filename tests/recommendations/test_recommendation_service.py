@@ -66,6 +66,39 @@ class _FakeMacroService:
         return self._adjustment
 
 
+class _FakeAnalysisHistoryService:
+    """Registra as chamadas de `record()` para inspeção nos testes, sem
+    tocar em nenhum banco.
+    """
+
+    def __init__(self) -> None:
+        self.recorded: list[dict] = []
+
+    def record(self, asset_id, ticker, company_name, recommendation, fundamentalist_data):
+        self.recorded.append(
+            {
+                "asset_id": asset_id,
+                "ticker": ticker,
+                "company_name": company_name,
+                "recommendation": recommendation,
+                "fundamentalist_data": fundamentalist_data,
+            }
+        )
+
+
+class _FakeAssetRepository:
+    """Por padrão simula um ativo sem nome cadastrado (usa o ticker como
+    fallback, como `RecommendationService` já faz)."""
+
+    def __init__(self, name: str | None = None) -> None:
+        self._name = name
+
+    def get_by_id(self, asset_id):
+        if self._name is None:
+            return None
+        return {"name": self._name}
+
+
 def _conclusion(label, breakdown, missing):
     return {
         "_id": ObjectId(),
@@ -93,6 +126,8 @@ def test_build_recommendation_all_concordant_complete():
         portfolio_service=_FakePortfolioService(),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -103,6 +138,70 @@ def test_build_recommendation_all_concordant_complete():
     assert result["agreement"] == "concordante"
     assert result["disclaimer"] == DISCLAIMER
     assert len(repo.inserted) == 1
+
+
+def test_build_recommendation_records_analysis_history():
+    """Toda recomendação gerada com sucesso deve gravar um snapshot no
+    Histórico de Análises — com o nome da empresa, o score final e os
+    dados fundamentalistas usados para preço-teto/DY.
+    """
+    conclusion = _conclusion(
+        "favoravel",
+        {
+            "fundamentalist": {"sub_score": 60.0, "highlights": []},
+            "technical": {"sub_score": 40.0, "highlights": []},
+            "news_sentiment": {"sub_score": 25.0, "highlights": []},
+        },
+        [],
+    )
+    history_service = _FakeAnalysisHistoryService()
+    asset_id = ObjectId()
+    fundamentalist_data = {"price": 42.21, "dividend_yield": 9.23}
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(fundamentalist_data),
+        macro_service=_FakeMacroService(),
+        analysis_history_service=history_service,
+        asset_repository=_FakeAssetRepository("Petrobras"),
+    )
+
+    result = service.build_recommendation(asset_id, "PETR4.SA")
+
+    assert len(history_service.recorded) == 1
+    call = history_service.recorded[0]
+    assert call["asset_id"] == asset_id
+    assert call["ticker"] == "PETR4.SA"
+    assert call["company_name"] == "Petrobras"
+    assert call["recommendation"] == result
+    assert call["fundamentalist_data"] == fundamentalist_data
+
+
+def test_build_recommendation_records_analysis_history_falls_back_to_ticker_as_name():
+    conclusion = _conclusion(
+        "favoravel",
+        {
+            "fundamentalist": {"sub_score": 60.0, "highlights": []},
+            "technical": {"sub_score": 40.0, "highlights": []},
+            "news_sentiment": {"sub_score": 25.0, "highlights": []},
+        },
+        [],
+    )
+    history_service = _FakeAnalysisHistoryService()
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
+        analysis_history_service=history_service,
+        asset_repository=_FakeAssetRepository(None),
+    )
+
+    service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert history_service.recorded[0]["company_name"] == "PETR4.SA"
 
 
 def test_build_recommendation_mixed_signals_downgrades_confidence():
@@ -121,6 +220,8 @@ def test_build_recommendation_mixed_signals_downgrades_confidence():
         portfolio_service=_FakePortfolioService(),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -145,6 +246,8 @@ def test_build_recommendation_missing_one_lowers_confidence():
         portfolio_service=_FakePortfolioService(),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -160,6 +263,8 @@ def test_build_recommendation_without_conclusion_raises():
         portfolio_service=_FakePortfolioService(),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     with pytest.raises(RecommendationError):
@@ -192,6 +297,8 @@ def test_build_recommendation_category_driven_by_fundamentalist_sub_score(
         portfolio_service=_FakePortfolioService(),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -215,6 +322,8 @@ def test_build_recommendation_missing_fundamentalist_is_revisao_necessaria():
         portfolio_service=_FakePortfolioService(),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -249,6 +358,8 @@ def test_build_recommendation_downgrades_when_overweight():
         portfolio_service=_FakePortfolioService(allocation),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -284,6 +395,8 @@ def test_build_recommendation_no_downgrade_when_below_target():
         portfolio_service=_FakePortfolioService(allocation),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -318,6 +431,8 @@ def test_build_recommendation_no_downgrade_for_unattractive_even_if_overweight()
         portfolio_service=_FakePortfolioService(allocation),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -341,6 +456,8 @@ def test_build_recommendation_allocation_none_when_no_position():
         portfolio_service=_FakePortfolioService(None),
         fundamentalist_repository=_FakeFundamentalistRepository(),
         macro_service=_FakeMacroService(),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -373,6 +490,8 @@ def test_build_recommendation_positive_macro_adjustment_can_upgrade_category():
             {"sector": "Energy", "industry": "Oil & Gas Integrated"}
         ),
         macro_service=_FakeMacroService(macro_adjustment),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -407,6 +526,8 @@ def test_build_recommendation_negative_macro_adjustment_can_downgrade_category()
             {"sector": "Financial Services", "industry": "Banks - Regional"}
         ),
         macro_service=_FakeMacroService(macro_adjustment),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -432,6 +553,8 @@ def test_build_recommendation_macro_adjustment_clamped_at_100():
         portfolio_service=_FakePortfolioService(),
         fundamentalist_repository=_FakeFundamentalistRepository({"sector": "Energy"}),
         macro_service=_FakeMacroService(macro_adjustment),
+        analysis_history_service=_FakeAnalysisHistoryService(),
+        asset_repository=_FakeAssetRepository(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")

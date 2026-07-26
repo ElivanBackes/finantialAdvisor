@@ -23,7 +23,12 @@ pages = [
         icon="🧭",
     ),
     st.Page("dashboard/pages/6_Carteira.py", title="Carteira", icon="💼"),
-    st.Page("dashboard/pages/7_Logs.py", title="Logs", icon="📜"),
+    st.Page(
+        "dashboard/pages/7_Historico_de_Analises.py",
+        title="Histórico de Análises",
+        icon="📚",
+    ),
+    st.Page("dashboard/pages/8_Logs.py", title="Logs", icon="📜"),
 ]
 
 with st.sidebar:
