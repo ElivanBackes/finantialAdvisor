@@ -165,10 +165,22 @@ amigável em caso de erro (ex: ticker não encontrado, análises insuficientes).
 python -m pytest tests/ -v
 ```
 
-Testes unitários com mocks/fixtures (sem rede real, sem Mongo real) para
-collectors, analyzers, scoring de conclusão/recomendação e orquestração dos
-services. `scripts/*.py` servem como testes de integração manuais contra as
-APIs e o Mongo reais.
+210 testes unitários com mocks/fixtures (sem rede real, sem Mongo real) para
+collectors, analyzers, scoring de conclusão/recomendação/alocação/macro,
+histórico de análises e orquestração dos services. `scripts/*.py` servem
+como testes de integração manuais contra as APIs e o Mongo reais.
+
+> ⚠️ Ao adicionar uma nova dependência a um service (ex: mais um repositório
+> ou outro service injetado no construtor), sempre injete um fake
+> correspondente em **todos** os testes antes de rodar a suíte — um
+> construtor com valor-padrão real (`XRepository()`) que nunca é
+> substituído por um teste grava de verdade no Mongo local se ele estiver
+> de pé. Isso já aconteceu durante o desenvolvimento do Histórico de
+> Análises: `RecommendationService` ganhou um `AnalysisHistoryService` novo,
+> a suíte rodou antes dos fakes serem adicionados aos testes, e ~16
+> documentos de teste foram parar na coleção real `analysis_history` (depois
+> limpos manualmente). Sintoma a observar: a suíte "passa" mesmo sem
+> nenhum fake para a dependência nova — não é sinal de que está tudo bem.
 
 Para testar o dashboard de ponta a ponta num navegador headless (Playwright),
 use a skill `.claude/skills/run-finantialadvisor/` — documenta setup, um
@@ -192,21 +204,21 @@ Configurado uma única vez por processo via `config/logging_setup.py`
 ## Estrutura de pastas
 
 ```
-core/            abstrações centrais: Asset, AssetType, Collector, Analyzer
-collectors/      coleta de dados brutos (yfinance, brapi.dev, NewsAPI)
-analyzers/       as 3 análises (fundamentalista, técnica, sentimento)
-conclusions/     síntese das 3 análises em um score + rótulo
-recommendations/ veredito final (categoria + confiança + justificativa)
-portfolio/       posições da carteira do usuário e cálculo de alocação
-macro/           ajuste de cenário macroeconômico setorial (BCB, Brent)
+core/             abstrações centrais: Asset, AssetType, Collector, Analyzer
+collectors/       coleta de dados brutos (yfinance, brapi.dev, NewsAPI)
+analyzers/        as 3 análises (fundamentalista, técnica, sentimento)
+conclusions/      síntese das 3 análises em um score + rótulo
+recommendations/  veredito final (categoria + confiança + justificativa)
+portfolio/        posições da carteira do usuário e cálculo de alocação
+macro/            ajuste de cenário macroeconômico setorial (BCB, Brent)
 analysis_history/ snapshot consultável de todo ativo já analisado (tela
-                 "Histórico de Análises")
-persistence/     repositórios MongoDB e definição de índices
-services/        orquestração (AssetService: coleta -> análises)
-config/          configuração (.env, conexão Mongo, logging_setup.py)
-dashboard/       app Streamlit (páginas e componentes)
-scripts/         scripts manuais (um por etapa do pipeline)
-tests/           testes automatizados (espelha a estrutura acima)
+                  "Histórico de Análises")
+persistence/      repositórios MongoDB e definição de índices
+services/         orquestração (AssetService: coleta -> análises)
+config/           configuração (.env, conexão Mongo, logging_setup.py)
+dashboard/        app Streamlit (páginas e componentes)
+scripts/          scripts manuais (um por etapa do pipeline)
+tests/            testes automatizados (espelha a estrutura acima)
 ```
 
 Regra de camadas: `dashboard/` nunca acessa `pymongo`/`collectors`/
@@ -219,7 +231,7 @@ etapa anterior — sempre leem o resultado mais recente já persistido.
 - yfinance não é consistente no formato de `dividend_yield`/`roe` (ora
   fração, ora percentual já multiplicado) — `conclusions/scoring.py`
   aplica uma heurística best-effort para normalizar (ver comentário em
-  `_normalize_percent`).
+  `normalize_percent`).
 - As regras de scoring (bandas de P/L, P/VP, RSI etc.) são heurísticas
   simples para o MVP, não calibradas com dados históricos reais.
 - NewsAPI (free tier) cobre só notícias do último mês e não deve ser usada

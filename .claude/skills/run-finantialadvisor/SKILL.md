@@ -108,7 +108,7 @@ source .venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-74 tests, all mocked/fake — no network, no Mongo required.
+210 tests, all mocked/fake — no network, no Mongo required.
 
 ---
 
@@ -141,6 +141,15 @@ python -m pytest tests/ -v
   unnecessary — plain `npx playwright install chromium` (browser binary
   only, downloads to `~/.cache/ms-playwright`, no sudo) was enough to
   render and screenshot the dashboard correctly.
+- **A new service dependency with a default real repository silently
+  pollutes the real Mongo if a test forgets to fake it** — e.g.
+  `RecommendationService(analysis_history_service=AnalysisHistoryService())`
+  by default, and any test that doesn't override it will really call
+  `.record()` (an unconditional upsert) against whatever Mongo the test
+  process can reach. The test still passes (no assertion fails), so this
+  doesn't show up as a failure — check for it by grepping the new
+  constructor param across the test file and confirming every call site
+  passes a fake, not by trusting a green run.
 
 ## Troubleshooting
 
