@@ -32,7 +32,27 @@ _RELEVANT_INFO_FIELDS = [
     "enterpriseToEbitda",
     "earningsGrowth",
     "revenueGrowth",
+    "ebit",
+    "taxRateForCalcs",
+    "investedCapital",
 ]
+
+# Linhas dos DataFrames de demonstrativos do yfinance (`.financials` /
+# `.balance_sheet`) usadas para calcular ROIC = EBIT x (1 - alíquota) /
+# Invested Capital. Colunas vêm em ordem decrescente de data — usamos o
+# valor mais recente não-nulo (nem todo período tem todas as linhas).
+_FINANCIALS_ROW = "EBIT"
+_TAX_RATE_ROW = "Tax Rate For Calcs"
+_BALANCE_SHEET_ROW = "Invested Capital"
+
+
+def _latest_non_null(df, row_label: str) -> float | None:
+    if df is None or df.empty or row_label not in df.index:
+        return None
+    for value in df.loc[row_label]:
+        if value is not None and value == value:  # descarta NaN sem exigir pandas
+            return float(value)
+    return None
 
 
 class YFinanceCollector:
@@ -81,9 +101,31 @@ class YFinanceCollector:
                     }
                 )
 
+        # Demonstrativos financeiros (ROIC) são chamadas extras e mais frágeis
+        # que `.info` — isoladas para que uma falha aqui não derrube a coleta
+        # do resto (info/history já validados acima).
+        extra_info = dict(info)
+        try:
+            ebit = _latest_non_null(ticker.financials, _FINANCIALS_ROW)
+            tax_rate = _latest_non_null(ticker.financials, _TAX_RATE_ROW)
+            invested_capital = _latest_non_null(ticker.balance_sheet, _BALANCE_SHEET_ROW)
+            if ebit is not None:
+                extra_info["ebit"] = ebit
+            if tax_rate is not None:
+                extra_info["taxRateForCalcs"] = tax_rate
+            if invested_capital is not None:
+                extra_info["investedCapital"] = invested_capital
+        except Exception:
+            logger.warning(
+                "yfinance: falha ao buscar demonstrativos financeiros (ROIC) para %s",
+                asset.ticker,
+            )
+
         payload = {
             "ticker": asset.ticker,
-            "info": {k: info.get(k) for k in _RELEVANT_INFO_FIELDS if info.get(k) is not None},
+            "info": {
+                k: extra_info.get(k) for k in _RELEVANT_INFO_FIELDS if extra_info.get(k) is not None
+            },
             "history": history,
         }
         return RawData(source=self.source_name, payload=payload)

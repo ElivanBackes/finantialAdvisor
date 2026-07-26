@@ -198,11 +198,16 @@ def _score_valuation(data: dict) -> tuple[float | None, str | None]:
 
 
 # Pesos do score fundamentalista, seguindo a tabela de pesos da
-# especificação (Fase 2: adiciona crescimento, FCF e EV/EBITDA; payout entra
-# como modificador do dividend_yield, não como peso próprio, conforme a spec
-# o descreve como "complementar"). ROIC, histórico real de múltiplos e
-# qualidade da gestão (5% cada na spec) ainda não têm fonte de dado e ficam
-# redistribuídos entre EV/EBITDA, PL e PVP até serem implementados.
+# especificação: Valuation 30 / DY 15 / ROE 10 / Crescimento 10 / FCF 10 /
+# Endividamento 10 / ROIC 5 / Histórico de Múltiplos 5 (Fase 4). Payout
+# entra como modificador do dividend_yield, não peso próprio ("complementar"
+# na spec). EV/EBITDA, P/L e P/VP absolutos não são critérios pesados pela
+# spec (seu papel é comparar com a própria média histórica, isto é,
+# "histórico de múltiplos") — mantidos aqui com peso residual pequeno como
+# sinal complementar, já que "histórico de múltiplos" só fica disponível
+# após ~3 análises acumuladas do mesmo ativo. Qualidade da gestão (5% na
+# spec) não tem fonte de dado gratuita confiável e fica de fora do dict —
+# seu peso é redistribuído automaticamente entre os critérios disponíveis.
 _FUNDAMENTALIST_WEIGHTS = {
     "valuation": 30,
     "dividend_yield": 15,
@@ -210,9 +215,11 @@ _FUNDAMENTALIST_WEIGHTS = {
     "growth": 10,
     "fcf": 10,
     "debt_to_equity": 10,
-    "ev_ebitda": 5,
-    "pl": 5,
-    "pvp": 5,
+    "roic": 5,
+    "historical_multiples": 5,
+    "ev_ebitda": 2,
+    "pl": 1.5,
+    "pvp": 1.5,
 }
 
 
@@ -276,6 +283,70 @@ def _score_fcf_yield(fcf: float | None, market_cap: float | None) -> tuple[float
     return 100.0, f"FCF yield forte ({fcf_yield_pct:.1f}%), geração de caixa robusta."
 
 
+def _score_roic(data: dict) -> tuple[float | None, str | None]:
+    """ROIC = EBIT x (1 - alíquota efetiva) / Capital Investido. Bandas
+    calibradas contra um custo de capital típico de ~10-12% (referência
+    histórica de mercado no Brasil) — quanto maior o ROIC acima desse
+    patamar, maior a geração de valor ao acionista.
+    """
+    ebit = data.get("ebit")
+    tax_rate = data.get("tax_rate")
+    invested_capital = data.get("invested_capital")
+    if ebit is None or tax_rate is None or invested_capital is None or invested_capital <= 0:
+        return None, None
+
+    roic_pct = ebit * (1 - tax_rate) / invested_capital * 100
+    if roic_pct < 0:
+        return -100.0, f"ROIC negativo ({roic_pct:.1f}%) — capital investido não está gerando retorno."
+    if roic_pct < 8:
+        return -20.0, f"ROIC de {roic_pct:.1f}%, abaixo do custo de capital típico."
+    if roic_pct < 12:
+        return 20.0, f"ROIC de {roic_pct:.1f}%, próximo do custo de capital."
+    if roic_pct < 20:
+        return 60.0, f"ROIC de {roic_pct:.1f}%, acima do custo de capital — boa eficiência operacional."
+    if roic_pct < 30:
+        return 90.0, f"ROIC de {roic_pct:.1f}%, muito acima do custo de capital."
+    return 100.0, f"ROIC de {roic_pct:.1f}% é excepcional."
+
+
+def _score_historical_multiples(data: dict) -> tuple[float | None, str | None]:
+    """Compara P/L, P/VP e EV/EBITDA atuais com a média histórica do
+    próprio ativo (não do mercado) — mesmo uma empresa excelente pode estar
+    negociando acima do seu próprio padrão. Requer histórico calculado por
+    `ConclusionService` (mín. 3 análises passadas); ausente para ativos
+    recém-cadastrados, redistribuindo o peso normalmente até haver histórico.
+    """
+    pairs = [
+        (data.get("pl"), data.get("pl_historical_avg")),
+        (data.get("pvp"), data.get("pvp_historical_avg")),
+        (data.get("ev_ebitda"), data.get("ev_ebitda_historical_avg")),
+    ]
+    discounts = [
+        (avg - current) / avg * 100
+        for current, avg in pairs
+        if current is not None and avg is not None and avg > 0
+    ]
+    if not discounts:
+        return None, None
+
+    discount_pct = sum(discounts) / len(discounts)
+    if discount_pct >= 20:
+        return 100.0, (
+            f"Múltiplos {discount_pct:.1f}% abaixo da própria média histórica "
+            "— barato frente ao padrão do ativo."
+        )
+    if discount_pct >= 10:
+        return 60.0, f"Múltiplos {discount_pct:.1f}% abaixo da própria média histórica."
+    if discount_pct >= -10:
+        return 0.0, "Múltiplos próximos da própria média histórica."
+    if discount_pct >= -20:
+        return -50.0, f"Múltiplos {abs(discount_pct):.1f}% acima da própria média histórica."
+    return -100.0, (
+        f"Múltiplos {abs(discount_pct):.1f}% acima da própria média histórica "
+        "— caro frente ao padrão do ativo."
+    )
+
+
 def score_fundamentalist(data: dict) -> tuple[float | None, list[str]]:
     scored = {
         "valuation": _score_valuation(data),
@@ -287,6 +358,8 @@ def score_fundamentalist(data: dict) -> tuple[float | None, list[str]]:
         "ev_ebitda": _score_ev_ebitda(data.get("ev_ebitda")),
         "growth": _score_growth(data.get("earnings_growth"), data.get("revenue_growth")),
         "fcf": _score_fcf_yield(data.get("fcf"), data.get("market_cap")),
+        "roic": _score_roic(data),
+        "historical_multiples": _score_historical_multiples(data),
     }
     available = {key: pair for key, pair in scored.items() if pair[0] is not None}
     if not available:

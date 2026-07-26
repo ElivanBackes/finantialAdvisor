@@ -8,12 +8,28 @@ from core.exceptions import CollectorError
 
 
 class _FakeTicker:
-    def __init__(self, info, history_df):
+    def __init__(self, info, history_df, financials=None, balance_sheet=None):
         self.info = info
         self._history_df = history_df
+        self.financials = financials if financials is not None else pd.DataFrame()
+        self.balance_sheet = balance_sheet if balance_sheet is not None else pd.DataFrame()
 
     def history(self, period=None, interval=None):
         return self._history_df
+
+
+class _FakeTickerFinancialsRaise(_FakeTicker):
+    """Simula uma falha ao acessar `.financials` (ex: dado indisponível para
+    o ticker) — deve ser isolada, sem derrubar a coleta de info/history.
+    """
+
+    @property
+    def financials(self):
+        raise RuntimeError("financials indisponível")
+
+    @financials.setter
+    def financials(self, value):
+        pass
 
 
 def _history_df(n=5):
@@ -46,6 +62,52 @@ def test_fetch_returns_raw_data_with_info_and_history(monkeypatch):
     assert "unused_field" not in raw.payload["info"]
     assert len(raw.payload["history"]) == 5
     assert raw.payload["history"][0]["close"] == 10.2
+
+
+def test_fetch_includes_roic_fields_from_financials_and_balance_sheet(monkeypatch):
+    info = {"currentPrice": 38.5}
+    financials = pd.DataFrame(
+        {"2025-12-31": [169257967200.0, 0.264042]}, index=["EBIT", "Tax Rate For Calcs"]
+    )
+    balance_sheet = pd.DataFrame({"2025-12-31": [558911275200.0]}, index=["Invested Capital"])
+    fake_ticker = _FakeTicker(
+        info=info, history_df=_history_df(), financials=financials, balance_sheet=balance_sheet
+    )
+    monkeypatch.setattr(module.yf, "Ticker", lambda ticker: fake_ticker)
+
+    collector = module.YFinanceCollector()
+    asset = Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
+
+    raw = collector.fetch(asset)
+
+    assert raw.payload["info"]["ebit"] == 169257967200.0
+    assert raw.payload["info"]["taxRateForCalcs"] == pytest.approx(0.264042)
+    assert raw.payload["info"]["investedCapital"] == 558911275200.0
+
+
+def test_fetch_skips_roic_fields_when_rows_missing(monkeypatch):
+    fake_ticker = _FakeTicker(info={"currentPrice": 38.5}, history_df=_history_df())
+    monkeypatch.setattr(module.yf, "Ticker", lambda ticker: fake_ticker)
+
+    raw = module.YFinanceCollector().fetch(
+        Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
+    )
+
+    assert "ebit" not in raw.payload["info"]
+    assert "taxRateForCalcs" not in raw.payload["info"]
+    assert "investedCapital" not in raw.payload["info"]
+
+
+def test_fetch_isolates_financials_failure_without_breaking_collection(monkeypatch):
+    fake_ticker = _FakeTickerFinancialsRaise(info={"currentPrice": 38.5}, history_df=_history_df())
+    monkeypatch.setattr(module.yf, "Ticker", lambda ticker: fake_ticker)
+
+    raw = module.YFinanceCollector().fetch(
+        Asset(ticker="PETR4.SA", asset_type=AssetType.BR_STOCK, name="Petrobras")
+    )
+
+    assert raw.payload["info"]["currentPrice"] == 38.5
+    assert "ebit" not in raw.payload["info"]
 
 
 def test_fetch_raises_collector_error_when_no_data(monkeypatch):

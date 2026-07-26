@@ -39,6 +39,33 @@ class _FakePortfolioService:
         return self._allocation
 
 
+class _FakeFundamentalistRepository:
+    """Por padrão simula ausência de análise fundamentalista persistida
+    (sem setor/indústria) — o `MacroService` então não recebe dado para
+    classificar setor. Passe `data` para simular sector/industry conhecidos.
+    """
+
+    def __init__(self, data: dict | None = None) -> None:
+        self._data = data
+
+    def find_latest_by_asset(self, asset_id):
+        if self._data is None:
+            return None
+        return {"data": self._data}
+
+
+class _FakeMacroService:
+    """Por padrão simula nenhum ajuste macro aplicável (setor não coberto).
+    Passe `adjustment` para simular um setor com ajuste real.
+    """
+
+    def __init__(self, adjustment: dict | None = None) -> None:
+        self._adjustment = adjustment
+
+    def compute_adjustment(self, sector, industry):
+        return self._adjustment
+
+
 def _conclusion(label, breakdown, missing):
     return {
         "_id": ObjectId(),
@@ -64,6 +91,8 @@ def test_build_recommendation_all_concordant_complete():
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=repo,
         portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -90,6 +119,8 @@ def test_build_recommendation_mixed_signals_downgrades_confidence():
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -112,6 +143,8 @@ def test_build_recommendation_missing_one_lowers_confidence():
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -125,6 +158,8 @@ def test_build_recommendation_without_conclusion_raises():
         conclusion_service=_FakeConclusionService(None),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     with pytest.raises(RecommendationError):
@@ -155,6 +190,8 @@ def test_build_recommendation_category_driven_by_fundamentalist_sub_score(
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -176,6 +213,8 @@ def test_build_recommendation_missing_fundamentalist_is_revisao_necessaria():
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -208,6 +247,8 @@ def test_build_recommendation_downgrades_when_overweight():
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(allocation),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -241,6 +282,8 @@ def test_build_recommendation_no_downgrade_when_below_target():
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(allocation),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -273,6 +316,8 @@ def test_build_recommendation_no_downgrade_for_unattractive_even_if_overweight()
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(allocation),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
@@ -294,9 +339,102 @@ def test_build_recommendation_allocation_none_when_no_position():
         conclusion_service=_FakeConclusionService(conclusion),
         recommendation_repository=_FakeRecommendationRepository(),
         portfolio_service=_FakePortfolioService(None),
+        fundamentalist_repository=_FakeFundamentalistRepository(),
+        macro_service=_FakeMacroService(),
     )
 
     result = service.build_recommendation(ObjectId(), "PETR4.SA")
 
     assert result["category"] == "comprar"
     assert result["allocation"] is None
+
+
+def test_build_recommendation_positive_macro_adjustment_can_upgrade_category():
+    """sub_score 59 -> 7.95/10 (Aguardar); +5 do macro -> 64 -> 8.2/10 (Comprar)."""
+    conclusion = _conclusion(
+        "neutro",
+        {
+            "fundamentalist": {"sub_score": 59.0, "highlights": []},
+            "technical": {"sub_score": 0.0, "highlights": []},
+            "news_sentiment": {"sub_score": 0.0, "highlights": []},
+        },
+        [],
+    )
+    macro_adjustment = {
+        "sector_category": "petroleo_gas",
+        "adjustment": 5.0,
+        "factors": ["Petróleo (Brent) em alta (+8.0% no período) — cenário tende a favorecer o setor."],
+    }
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(
+            {"sector": "Energy", "industry": "Oil & Gas Integrated"}
+        ),
+        macro_service=_FakeMacroService(macro_adjustment),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["category"] == "comprar"
+    assert result["macro"] == macro_adjustment
+    assert any("+5.0 pontos" in item for item in result["justification"])
+    assert any("Petróleo" in item for item in result["justification"])
+
+
+def test_build_recommendation_negative_macro_adjustment_can_downgrade_category():
+    """sub_score 61 -> 8.05/10 (Comprar); -5 do macro -> 56 -> 7.8/10 (Aguardar)."""
+    conclusion = _conclusion(
+        "neutro",
+        {
+            "fundamentalist": {"sub_score": 61.0, "highlights": []},
+            "technical": {"sub_score": 0.0, "highlights": []},
+            "news_sentiment": {"sub_score": 0.0, "highlights": []},
+        },
+        [],
+    )
+    macro_adjustment = {
+        "sector_category": "bancos_seguros",
+        "adjustment": -5.0,
+        "factors": ["Selic baixa (5.00% a.a.) — tende a pressionar margens de bancos/seguradoras."],
+    }
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository(
+            {"sector": "Financial Services", "industry": "Banks - Regional"}
+        ),
+        macro_service=_FakeMacroService(macro_adjustment),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["category"] == "aguardar"
+    assert result["macro"] == macro_adjustment
+
+
+def test_build_recommendation_macro_adjustment_clamped_at_100():
+    conclusion = _conclusion(
+        "favoravel",
+        {
+            "fundamentalist": {"sub_score": 98.0, "highlights": []},
+            "technical": {"sub_score": 0.0, "highlights": []},
+            "news_sentiment": {"sub_score": 0.0, "highlights": []},
+        },
+        [],
+    )
+    macro_adjustment = {"sector_category": "petroleo_gas", "adjustment": 10.0, "factors": ["x"]}
+    service = RecommendationService(
+        conclusion_service=_FakeConclusionService(conclusion),
+        recommendation_repository=_FakeRecommendationRepository(),
+        portfolio_service=_FakePortfolioService(),
+        fundamentalist_repository=_FakeFundamentalistRepository({"sector": "Energy"}),
+        macro_service=_FakeMacroService(macro_adjustment),
+    )
+
+    result = service.build_recommendation(ObjectId(), "PETR4.SA")
+
+    assert result["fundamentalist_score_0_10"] == 10.0
+    assert result["category"] == "compra_forte"

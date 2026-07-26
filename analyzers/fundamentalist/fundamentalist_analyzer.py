@@ -17,6 +17,11 @@ _YF_FIELD_MAP = {
     "ev_ebitda": "enterpriseToEbitda",
     "earnings_growth": "earningsGrowth",
     "revenue_growth": "revenueGrowth",
+    "ebit": "ebit",
+    "tax_rate": "taxRateForCalcs",
+    "invested_capital": "investedCapital",
+    "sector": "sector",
+    "industry": "industry",
 }
 
 # Nomes de campo do brapi.dev (modules=defaultKeyStatistics,financialData).
@@ -30,7 +35,9 @@ _BRAPI_FIELD_MAP = {
 
 class FundamentalistAnalyzer:
     """Análise fundamentalista: P/L, P/VP, Dividend Yield, ROE, endividamento,
-    payout, fluxo de caixa livre, EV/EBITDA e crescimento (lucro/receita).
+    payout, fluxo de caixa livre, EV/EBITDA, crescimento (lucro/receita),
+    ROIC (EBIT, alíquota, capital investido) e setor/indústria (para o
+    ajuste macro em `recommendations/`).
 
     Prefere dados do yfinance; usa brapi.dev como fallback por campo quando
     o yfinance não trouxer o indicador.
@@ -46,7 +53,7 @@ class FundamentalistAnalyzer:
         if not yf_info and not brapi_quote:
             raise AnalyzerError(f"Sem dados fundamentalistas disponíveis para {asset.ticker}")
 
-        indicators: dict[str, float | None] = {}
+        indicators: dict[str, float | str | None] = {}
         field_sources: dict[str, str] = {}
         for field, yf_key in _YF_FIELD_MAP.items():
             value = yf_info.get(yf_key)
